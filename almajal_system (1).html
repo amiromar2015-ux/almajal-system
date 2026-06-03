@@ -2382,22 +2382,28 @@ function warehouseHTML(){
 /* ── SETTINGS ── */
 
 function empReportHTML(){
-  const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  if(!DB.employees||DB.employees.length===0) return `
+  <div style="font-weight:800;font-size:16px;margin-bottom:16px;">👤 تقرير الموظفين</div>
+  <div class="glass" style="padding:40px;text-align:center;color:var(--text4);">
+    <div style="font-size:40px;margin-bottom:12px;">👷</div>
+    <div>لا يوجد موظفون — أضف موظفين من الإعدادات</div>
+  </div>`;
+
   return `
   <div style="font-weight:800;font-size:16px;margin-bottom:16px;">👤 تقرير الموظفين</div>
-  <div class="glass" style="overflow:hidden;">
+  <div class="glass" style="overflow:hidden;margin-bottom:16px;">
     <table class="tbl">
       <thead><tr><th>الموظف</th><th>الوظيفة</th><th>عدد العهد</th><th>إجمالي العهد</th><th>المسوى</th><th>المفتوح</th></tr></thead>
       <tbody>
         ${DB.employees.map(e=>{
-          const custs=DB.custodies.filter(c=>c.employeeId===e.id);
-          const total=custs.reduce((s,c)=>s+c.amount,0);
-          const settled=custs.filter(c=>c.status==='settled').reduce((s,c)=>s+c.amount,0);
-          const open=custs.filter(c=>c.status!=='settled').reduce((s,c)=>s+c.amount,0);
+          const custs=(DB.custodies||[]).filter(c=>c.employeeId===e.id);
+          const total=custs.reduce((s,c)=>s+(c.amount||0),0);
+          const settled=custs.filter(c=>c.status==='settled').reduce((s,c)=>s+(c.amount||0),0);
+          const open=custs.filter(c=>c.status!=='settled').reduce((s,c)=>s+(c.amount||0),0);
           return '<tr>'+
             '<td style="font-weight:700;">'+e.name+'</td>'+
             '<td style="color:var(--text3);">'+e.role+'</td>'+
-            '<td style="text-align:center;">'+custs.length+'</td>'+
+            '<td style="text-align:center;font-weight:700;">'+custs.length+'</td>'+
             '<td style="font-weight:700;color:var(--gold2);">'+fmt(total)+' '+SAR+'</td>'+
             '<td style="color:#10b981;font-weight:600;">'+fmt(settled)+' '+SAR+'</td>'+
             '<td style="color:'+(open>0?'#f43f5e':'#10b981')+';font-weight:700;">'+fmt(open)+' '+SAR+'</td>'+
@@ -2405,7 +2411,27 @@ function empReportHTML(){
         }).join('')}
       </tbody>
     </table>
-  </div>`;
+  </div>
+  ${(DB.custodies||[]).length>0?`
+  <div style="font-weight:700;font-size:14px;margin-bottom:12px;color:var(--text2);">📋 تفاصيل العهد المفتوحة</div>
+  <div class="glass" style="overflow:hidden;">
+    <table class="tbl">
+      <thead><tr><th>الموظف</th><th>المشروع</th><th>المبلغ</th><th>التاريخ</th><th>الحالة</th></tr></thead>
+      <tbody>
+        ${(DB.custodies||[]).filter(c=>c.status!=='settled').map(c=>{
+          const emp=empById(c.employeeId);
+          const proj=DB.projects.find(p=>p.id===c.projectId)||{name:'—'};
+          return '<tr>'+
+            '<td style="font-weight:700;">'+emp.name+'</td>'+
+            '<td style="color:var(--text3);">'+proj.name+'</td>'+
+            '<td style="color:#f59e0b;font-weight:700;">'+fmt(c.amount)+' '+SAR+'</td>'+
+            '<td style="color:var(--text3);">'+( c.issuedAt||'—')+'</td>'+
+            '<td><span style="background:rgba(244,63,94,0.1);color:#f43f5e;border-radius:50px;padding:3px 10px;font-size:11px;">مفتوح</span></td>'+
+          '</tr>';
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`:''}`;
 }
 
 function settingsHTML(){
@@ -3124,28 +3150,38 @@ function updateLineOpts(sid,pid){
   if(el) el.innerHTML=DB.lines.filter(l=>l.projectId===pid).map(l=>`<option value="${l.id}">${l.category}</option>`).join('');
 }
 function addInvoice(){
-  const desc=document.getElementById('new-inv-desc')?.value||'';
-  const amt=+document.getElementById('new-inv-amt')?.value||0;
-  const url=document.getElementById('new-inv-url')?.value||'';
-  if(!amt) return;
+  const descEl=document.getElementById('new-inv-desc');
+  const amtEl=document.getElementById('new-inv-amt');
+  const urlEl=document.getElementById('new-inv-url');
+  if(!descEl||!amtEl) return;
+  const desc=descEl.value||'';
+  const amt=parseFloat(amtEl.value)||0;
+  const url=urlEl?urlEl.value||'':'';
+  if(!amt||amt<=0){ showToast('أدخل المبلغ','#f43f5e'); return; }
   tempInvoices.push({desc,amount:amt,url});
-  document.getElementById('new-inv-desc').value='';
-  document.getElementById('new-inv-amt').value='';
-  document.getElementById('new-inv-url').value='';
-  refreshInvList(); updateSettleDiff();
+  descEl.value='';
+  amtEl.value='';
+  if(urlEl) urlEl.value='';
+  refreshInvList();
+  updateSettleDiff();
 }
 function removeInvoice(i){ tempInvoices.splice(i,1); refreshInvList(); updateSettleDiff(); }
 function refreshInvList(){
   const el=document.getElementById('inv-list'); if(!el) return;
-  el.innerHTML=tempInvoices.map((inv,i)=>`
-    <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="flex:1;font-size:12px;">${inv.desc||'فاتورة'}</span>
-        <span style="font-size:12px;font-weight:700;color:#a5b4fc;">${fmt(inv.amount)} ${SAR}</span>
-        <button onclick="removeInvoice(${i})" style="background:none;border:none;cursor:pointer;color:var(--text4);font-size:13px;">✕</button>
-      </div>
-      ${inv.url?'<a href="'+inv.url+'" target="_blank" style="font-size:10px;color:#38bdf8;">🔗 عرض الفاتورة</a>':''}
-    </div>`).join('');
+  if(tempInvoices.length===0){
+    el.innerHTML='<div style="padding:10px;text-align:center;color:var(--text4);font-size:12px;">لا توجد فواتير بعد</div>';
+    return;
+  }
+  el.innerHTML=tempInvoices.map((inv,i)=>
+    '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'+
+    '<div style="display:flex;align-items:center;gap:8px;">'+
+    '<span style="flex:1;font-size:12px;color:var(--text);">'+(inv.desc||'فاتورة')+'</span>'+
+    '<span style="font-size:12px;font-weight:700;color:#6366f1;">'+fmt(inv.amount)+' '+SAR+'</span>'+
+    '<button onclick="removeInvoice('+i+')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:16px;">✕</button>'+
+    '</div>'+
+    (inv.url?'<a href="'+inv.url+'" target="_blank" style="font-size:10px;color:#38bdf8;">🔗 عرض الفاتورة</a>':'')+
+    '</div>'
+  ).join('');
 }
 function updateSettleDiff(){
   const cid=document.getElementById('settle-cust-id')?.value;
@@ -3359,19 +3395,38 @@ function deleteCustody(id){
 function saveSettle(){
   const custId=document.getElementById('settle-cust-id')?.value;
   const returned=+document.getElementById('settle-returned')?.value||0;
-  DB.custodies=DB.custodies.map(c=>{
-    if(c.id!==custId) return c;
-    const invTotal=tempInvoices.reduce((s,i)=>s+i.amount,0);
-    const diff=c.amount-invTotal-returned;
-    const status=Math.abs(diff)<0.5?'settled':invTotal+returned>0?'partial':'open';
-    return {...c,invoices:tempInvoices,returned,status};
+  const c=DB.custodies.find(x=>x.id===custId);
+  if(!c) return showToast('خطأ: العهدة مش موجودة','#f43f5e');
+
+  const invTotal=tempInvoices.reduce((s,i)=>s+i.amount,0);
+  const diff=c.amount-invTotal-returned;
+  const status=Math.abs(diff)<0.5?'settled':invTotal+returned>0?'partial':'open';
+
+  // Update custody with invoices
+  DB.custodies=DB.custodies.map(x=>{
+    if(x.id!==custId) return x;
+    return {...x,invoices:tempInvoices,returned,status};
   });
+
+  // Only add returned cash as income transaction (invoices are counted via custody)
   if(returned>0){
-    const c=DB.custodies.find(x=>x.id===custId);
-    if(c) DB.transactions.push({id:uid(),projectId:c.projectId,budgetLineId:c.budgetLineId,vault:c.vault,type:'in',amount:returned,description:`استرداد عهدة — ${empById(c.employeeId).name}`,date:today(),payMethod:'cash'});
+    DB.transactions.push({
+      id:uid(),
+      projectId:c.projectId,
+      budgetLineId:c.budgetLineId,
+      vault:c.vault||'cash',
+      type:'in',
+      amount:returned,
+      description:'استرداد عهدة — '+empById(c.employeeId).name,
+      date:today(),
+      payMethod:'cash'
+    });
   }
+
   tempInvoices=[];
-  saveDB();closeModal();showToast('تم تسوية العهدة ✓');render();
+  saveDB(); closeModal();
+  showToast('✅ تم تسوية العهدة','#10b981');
+  render();
 }
 function saveLine(){
   const amount=+document.getElementById('nl-amount')?.value;
