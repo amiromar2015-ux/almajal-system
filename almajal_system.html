@@ -3150,28 +3150,38 @@ function updateLineOpts(sid,pid){
   if(el) el.innerHTML=DB.lines.filter(l=>l.projectId===pid).map(l=>`<option value="${l.id}">${l.category}</option>`).join('');
 }
 function addInvoice(){
-  const desc=document.getElementById('new-inv-desc')?.value||'';
-  const amt=+document.getElementById('new-inv-amt')?.value||0;
-  const url=document.getElementById('new-inv-url')?.value||'';
-  if(!amt) return;
+  const descEl=document.getElementById('new-inv-desc');
+  const amtEl=document.getElementById('new-inv-amt');
+  const urlEl=document.getElementById('new-inv-url');
+  if(!descEl||!amtEl) return;
+  const desc=descEl.value||'';
+  const amt=parseFloat(amtEl.value)||0;
+  const url=urlEl?urlEl.value||'':'';
+  if(!amt||amt<=0){ showToast('أدخل المبلغ','#f43f5e'); return; }
   tempInvoices.push({desc,amount:amt,url});
-  document.getElementById('new-inv-desc').value='';
-  document.getElementById('new-inv-amt').value='';
-  document.getElementById('new-inv-url').value='';
-  refreshInvList(); updateSettleDiff();
+  descEl.value='';
+  amtEl.value='';
+  if(urlEl) urlEl.value='';
+  refreshInvList();
+  updateSettleDiff();
 }
 function removeInvoice(i){ tempInvoices.splice(i,1); refreshInvList(); updateSettleDiff(); }
 function refreshInvList(){
   const el=document.getElementById('inv-list'); if(!el) return;
-  el.innerHTML=tempInvoices.map((inv,i)=>`
-    <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="flex:1;font-size:12px;">${inv.desc||'فاتورة'}</span>
-        <span style="font-size:12px;font-weight:700;color:#a5b4fc;">${fmt(inv.amount)} ${SAR}</span>
-        <button onclick="removeInvoice(${i})" style="background:none;border:none;cursor:pointer;color:var(--text4);font-size:13px;">✕</button>
-      </div>
-      ${inv.url?'<a href="'+inv.url+'" target="_blank" style="font-size:10px;color:#38bdf8;">🔗 عرض الفاتورة</a>':''}
-    </div>`).join('');
+  if(tempInvoices.length===0){
+    el.innerHTML='<div style="padding:10px;text-align:center;color:var(--text4);font-size:12px;">لا توجد فواتير بعد</div>';
+    return;
+  }
+  el.innerHTML=tempInvoices.map((inv,i)=>
+    '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'+
+    '<div style="display:flex;align-items:center;gap:8px;">'+
+    '<span style="flex:1;font-size:12px;color:var(--text);">'+(inv.desc||'فاتورة')+'</span>'+
+    '<span style="font-size:12px;font-weight:700;color:#6366f1;">'+fmt(inv.amount)+' '+SAR+'</span>'+
+    '<button onclick="removeInvoice('+i+')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:16px;">✕</button>'+
+    '</div>'+
+    (inv.url?'<a href="'+inv.url+'" target="_blank" style="font-size:10px;color:#38bdf8;">🔗 عرض الفاتورة</a>':'')+
+    '</div>'
+  ).join('');
 }
 function updateSettleDiff(){
   const cid=document.getElementById('settle-cust-id')?.value;
@@ -3385,19 +3395,53 @@ function deleteCustody(id){
 function saveSettle(){
   const custId=document.getElementById('settle-cust-id')?.value;
   const returned=+document.getElementById('settle-returned')?.value||0;
-  DB.custodies=DB.custodies.map(c=>{
-    if(c.id!==custId) return c;
-    const invTotal=tempInvoices.reduce((s,i)=>s+i.amount,0);
-    const diff=c.amount-invTotal-returned;
-    const status=Math.abs(diff)<0.5?'settled':invTotal+returned>0?'partial':'open';
-    return {...c,invoices:tempInvoices,returned,status};
+  const c=DB.custodies.find(x=>x.id===custId);
+  if(!c) return showToast('خطأ: العهدة مش موجودة','#f43f5e');
+
+  const invTotal=tempInvoices.reduce((s,i)=>s+i.amount,0);
+  const diff=c.amount-invTotal-returned;
+  const status=Math.abs(diff)<0.5?'settled':invTotal+returned>0?'partial':'open';
+
+  // Update custody
+  DB.custodies=DB.custodies.map(x=>{
+    if(x.id!==custId) return x;
+    return {...x,invoices:tempInvoices,returned,status};
   });
-  if(returned>0){
-    const c=DB.custodies.find(x=>x.id===custId);
-    if(c) DB.transactions.push({id:uid(),projectId:c.projectId,budgetLineId:c.budgetLineId,vault:c.vault,type:'in',amount:returned,description:`استرداد عهدة — ${empById(c.employeeId).name}`,date:today(),payMethod:'cash'});
+
+  // Add invoice total as transaction on project
+  if(invTotal>0){
+    DB.transactions.push({
+      id:uid(),
+      projectId:c.projectId,
+      budgetLineId:c.budgetLineId,
+      vault:c.vault||'cash',
+      type:'out',
+      amount:invTotal,
+      description:'تسوية عهدة — '+empById(c.employeeId).name,
+      date:today(),
+      payMethod:'cash'
+    });
   }
+
+  // Add returned cash as income transaction
+  if(returned>0){
+    DB.transactions.push({
+      id:uid(),
+      projectId:c.projectId,
+      budgetLineId:c.budgetLineId,
+      vault:c.vault||'cash',
+      type:'in',
+      amount:returned,
+      description:'استرداد عهدة — '+empById(c.employeeId).name,
+      date:today(),
+      payMethod:'cash'
+    });
+  }
+
   tempInvoices=[];
-  saveDB();closeModal();showToast('تم تسوية العهدة ✓');render();
+  saveDB(); closeModal();
+  showToast('✅ تم تسوية العهدة وتحميل المصاريف على المشروع','#10b981');
+  render();
 }
 function saveLine(){
   const amount=+document.getElementById('nl-amount')?.value;
