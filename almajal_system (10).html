@@ -359,9 +359,10 @@ let DB = {
   vehicleExpenses:[], // مصروفات: {id, vehicleId, projectId, type(fuel/maintenance), amount, liters, date, note, odometer}
   monthlyBudgets:[],  // ميزانيات شهرية: {id, lineId, month, year, amount}
   companyName:'شركة مجموعة المجال العربي', // اسم الشركة
+  invoices:[],        // فواتير: {id, supplier, lineId, projectId, invoiceNo, date, amount, tax, total, note}
 };
 
-function saveDB(){ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(DB));}catch(e){} window._fbSave&&window._fbSave(); }
+function saveDB(){ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(DB));}catch(e){} if(window._fbSave) window._fbSave(); }
 function loadDB(){
   try{
     const r=localStorage.getItem(STORAGE_KEY);
@@ -372,6 +373,7 @@ function loadDB(){
   }catch(e){}
   if(!DB.monthlyBudgets) DB.monthlyBudgets=[];
   if(!DB.companyName) DB.companyName=COMPANY;
+  if(!DB.invoices) DB.invoices=[];
   if(!DB.items) DB.items=[];
   if(!DB.stockMovements) DB.stockMovements=[];
   if(!DB.statements) DB.statements=[];
@@ -384,53 +386,51 @@ function loadDB(){
 }
 
 /* ═══════════════════════
-   FIREBASE
+   FIREBASE REST API
 ═══════════════════════ */
-function initFirebase(){
+const FB_PROJECT = 'almajal-system';
+const FB_KEY = 'AIzaSyB6obSzEWOtIKkLviEc5XR139CWK8cbbjk';
+const FB_URL = `https://firestore.googleapis.com/v1/projects/${FB_PROJECT}/databases/(default)/documents/almajal/data?key=${FB_KEY}`;
+
+async function fbLoad(){
   try{
-    const app = firebase.initializeApp({
-      apiKey: "AIzaSyB6obSzEWOtIKkLviEc5XR139CWK8cbbjk",
-      authDomain: "almajal-system.firebaseapp.com",
-      projectId: "almajal-system",
-      storageBucket: "almajal-system.firebasestorage.app",
-      messagingSenderId: "659318962288",
-      appId: "1:659318962288:web:348866f06fffb089b69cb5"
-    });
-    const fdb = firebase.firestore();
-    const ref = fdb.collection('almajal').doc('data');
+    const r = await fetch(FB_URL);
+    if(!r.ok) return;
+    const json = await r.json();
+    const payload = json.fields?.payload?.stringValue;
+    if(!payload) return;
+    const d = JSON.parse(payload);
+    if(!d.projects) return;
+    DB = d;
+    if(!DB.monthlyBudgets) DB.monthlyBudgets=[];
+    if(!DB.companyName) DB.companyName=COMPANY;
+    if(!DB.items) DB.items=[];
+    if(!DB.stockMovements) DB.stockMovements=[];
+    if(!DB.statements) DB.statements=[];
+    if(!DB.assets) DB.assets=[];
+    if(!DB.extracts) DB.extracts=[];
+    if(!DB.vehicles) DB.vehicles=[];
+    if(!DB.vehicleExpenses) DB.vehicleExpenses=[];
+    if(!DB.claims) DB.claims=[];
+    if(!DB.custodies) DB.custodies=[];
+    render();
+    showToast('✅ تم تحميل البيانات من السحابة','#10b981');
+  }catch(e){ console.log('Firebase load error:',e); }
+}
 
-    // Load from Firebase
-    ref.get().then(snap=>{
-      if(snap.exists){
-        try{
-          const d=JSON.parse(snap.data().payload);
-          if(d.projects){
-            DB=d;
-            if(!DB.monthlyBudgets) DB.monthlyBudgets=[];
-            if(!DB.companyName) DB.companyName=COMPANY;
-            if(!DB.items) DB.items=[];
-            if(!DB.stockMovements) DB.stockMovements=[];
-            if(!DB.statements) DB.statements=[];
-            if(!DB.assets) DB.assets=[];
-            if(!DB.extracts) DB.extracts=[];
-            if(!DB.vehicles) DB.vehicles=[];
-            if(!DB.vehicleExpenses) DB.vehicleExpenses=[];
-            if(!DB.claims) DB.claims=[];
-            if(!DB.custodies) DB.custodies=[];
-            render();
-            showToast('✅ تم تحميل البيانات من السحابة','#10b981');
-          }
-        }catch(e){}
-      }
-    }).catch(e=>{});
+async function fbSave(){
+  try{
+    const body = {fields:{payload:{stringValue:JSON.stringify(DB)},t:{integerValue:Date.now()}}};
+    await fetch(FB_URL, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  }catch(e){ console.log('Firebase save error:',e); }
+}
 
-    // Save function
-    window._fbSave = ()=>{
-      ref.set({payload:JSON.stringify(DB),t:Date.now()}).catch(e=>{});
-    };
-
+function initFirebase(){
+  window._fbSave = fbLoad; // placeholder
+  fbLoad().then(()=>{
+    window._fbSave = fbSave;
     showToast('🔗 متصل بالسحابة','#10b981');
-  }catch(e){ console.log('Firebase error:',e); }
+  }).catch(()=>{});
 }
 
 setTimeout(initFirebase, 1000);
@@ -440,8 +440,9 @@ setTimeout(initFirebase, 1000);
 ═══════════════════════════════════ */
 function lineSpentAll(){
   const map={};
+  // Transactions (includes invoices from invoices tab)
   DB.transactions.filter(t=>t.type==='out').forEach(t=>{ if(t.budgetLineId) map[t.budgetLineId]=(map[t.budgetLineId]||0)+t.amount; });
-  DB.custodies.forEach(c=>{ const inv=(c.invoices||[]).reduce((s,i)=>s+i.amount,0); if(c.budgetLineId) map[c.budgetLineId]=(map[c.budgetLineId]||0)+inv; });
+  // Claims
   DB.claims.forEach(c=>{ if(c.budgetLineId) map[c.budgetLineId]=(map[c.budgetLineId]||0)+c.amount; });
   return map;
 }
@@ -571,6 +572,7 @@ function renderTabs(){
     {k:'vehicles',lb:'🚗 السيارات والمعدات'},
     {k:'assets',lb:'🏷️ الأصول'},
     {k:'warehouse',lb:'📦 المخزن'},
+    {k:'invoices',lb:'🧾 الفواتير'},
     {k:'reports',lb:'📊 التقارير الشهرية'},
     {k:'fullreport',lb:'📋 التقرير الكامل'},
     {k:'empReport',lb:'👤 تقرير الموظف'},{k:'settings',lb:'⚙ الإعدادات'},
@@ -611,6 +613,7 @@ function renderMain(){
     case 'extracts':   el.innerHTML=extractsHTML(); break;
     case 'vehicles':   el.innerHTML=vehiclesHTML(); break;
     case 'assets':     el.innerHTML=assetsHTML(); break;
+    case 'invoices':   el.innerHTML=invoicesHTML(); setTimeout(renderInvTable,80); break;
     case 'warehouse':  el.innerHTML=warehouseHTML(); break;
     case 'empReport':  el.innerHTML=empReportHTML(); break;
     case 'settings': el.innerHTML=settingsHTML(); break;
@@ -1497,7 +1500,7 @@ function custsHTML(){
         <span>↩ مرتجع: <strong style="color:#34d399;">${fmt(c.returned)} ${SAR}</strong></span>
         <span style="color:${diff>0?'#f87171':diff<0?'#38bdf8':'#34d399'};font-weight:700;">${diff>0?('ذمة الموظف: '+fmt(diff)+' '+SAR):diff<0?('مستحق للموظف: '+fmt(Math.abs(diff))+' '+SAR):'✅ مسوى'}</span>
       </div>
-      ${c.status!=='settled'?('<button onclick="openModal(\'settle\',\''+c.id+'\')" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:50px;padding:7px 16px;color:#fcd34d;font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;">تسوية العهدة ←</button>'):''}
+      ${c.status!=='settled'?('<button onclick="openModal(\'settle\',\''+c.id+'\')" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:50px;padding:7px 16px;color:#fcd34d;font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;">تسوية العهدة ←</button>'):('<button onclick="reopenCustody(\''+c.id+'\')" style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);border-radius:50px;padding:7px 16px;color:#a5b4fc;font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;">↩ إعادة فتح</button>')}
       ${c.invoiceUrl?('<a href="'+c.invoiceUrl+'" target="_blank" style="display:inline-flex;align-items:center;gap:5px;margin-right:8px;font-size:12px;color:#38bdf8;text-decoration:none;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);border-radius:50px;padding:7px 14px;">🔗 فاتورة العهدة</a>'):''}
       <button onclick="printCustody('${c.id}')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);border-radius:50px;padding:7px 16px;color:var(--gold2);font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;margin-right:8px;">🖨 طباعة السند</button>
     </div>`;
@@ -2266,6 +2269,307 @@ function assetsHTML(){
 }
 
 /* ── WAREHOUSE ── */
+
+
+let tempInvVehicles = [];
+
+function addInvVehicle(){
+  const no = document.getElementById('ni-veh-no')?.value?.trim();
+  const amt = parseFloat(document.getElementById('ni-veh-amt')?.value)||0;
+  if(!no) return showToast('أدخل رقم السيارة','#f43f5e');
+  if(!amt) return showToast('أدخل المبلغ','#f43f5e');
+  tempInvVehicles.push({no, amount: amt});
+  document.getElementById('ni-veh-no').value='';
+  document.getElementById('ni-veh-amt').value='';
+  refreshInvVehicles();
+  // Update total amount
+  const total = tempInvVehicles.reduce((s,v)=>s+v.amount,0);
+  const amtEl = document.getElementById('ni-amount');
+  if(amtEl){ amtEl.value=total; calcInvTax(); }
+}
+
+function removeInvVehicle(i){
+  tempInvVehicles.splice(i,1);
+  refreshInvVehicles();
+  const total = tempInvVehicles.reduce((s,v)=>s+v.amount,0);
+  const amtEl = document.getElementById('ni-amount');
+  if(amtEl){ amtEl.value=total; calcInvTax(); }
+}
+
+function refreshInvVehicles(){
+  const el = document.getElementById('ni-vehicles-list');
+  if(!el) return;
+  if(!tempInvVehicles.length){
+    el.innerHTML='';
+    return;
+  }
+  el.innerHTML = tempInvVehicles.map((v,i)=>
+    '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);">'+
+    '<span style="flex:1;font-size:12px;font-weight:600;">'+v.no+'</span>'+
+    '<span style="font-size:12px;color:#6366f1;font-weight:700;">'+fmt(v.amount)+' '+SAR+'</span>'+
+    '<button onclick="removeInvVehicle('+i+')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:14px;">✕</button>'+
+    '</div>'
+  ).join('');
+}
+
+function updateInvLines(projId){
+  if(!projId) projId=document.getElementById('ni-proj')?.value;
+  const lineEl=document.getElementById('ni-line');
+  if(!lineEl) return;
+  const lines=(DB.lines||[]).filter(l=>l.projectId===projId);
+  lineEl.innerHTML=lines.length?lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join(''):'<option value="">لا توجد بنود</option>';
+}
+
+function calcInvTax(){
+  const amt=parseFloat(document.getElementById('ni-amount')?.value)||0;
+  const tax=Math.round(amt*0.15*100)/100;
+  const taxEl=document.getElementById('ni-tax');
+  const totalEl=document.getElementById('ni-total');
+  if(taxEl) taxEl.value=tax;
+  if(totalEl) totalEl.value=Math.round((amt+tax)*100)/100;
+}
+
+function calcInvTotal(){
+  const amt=parseFloat(document.getElementById('ni-amount')?.value)||0;
+  const tax=parseFloat(document.getElementById('ni-tax')?.value)||0;
+  const totalEl=document.getElementById('ni-total');
+  if(totalEl) totalEl.value=Math.round((amt+tax)*100)/100;
+}
+
+function saveInvoiceRow(){
+  const projId=document.getElementById('ni-proj')?.value;
+  const lineId=document.getElementById('ni-line')?.value;
+  const supplier=document.getElementById('ni-supplier')?.value?.trim()||'';
+  const desc=document.getElementById('ni-desc')?.value?.trim()||'';
+  const vehicleNo=tempInvVehicles.length?tempInvVehicles.map(v=>v.no).join(', '):'';
+  const vehicleDetails=[...tempInvVehicles];
+  const invoiceNo=document.getElementById('ni-no')?.value?.trim()||'';
+  const date=document.getElementById('ni-date')?.value||today();
+  const amount=parseFloat(document.getElementById('ni-amount')?.value)||0;
+  const tax=parseFloat(document.getElementById('ni-tax')?.value)||0;
+  const total=parseFloat(document.getElementById('ni-total')?.value)||0;
+  if(!amount||amount<=0) return showToast('أدخل قيمة الفاتورة','#f43f5e');
+  if(!supplier) return showToast('أدخل اسم المورد','#f43f5e');
+  if(!DB.invoices) DB.invoices=[];
+  // Check duplicate
+  if(invoiceNo){
+    const dup=DB.invoices.find(i=>i.invoiceNo===invoiceNo&&i.supplier===supplier);
+    if(dup){ if(!confirm('⚠️ رقم الفاتورة '+invoiceNo+' مسجل مسبقاً لنفس المورد!\nهل تريد الإضافة على أي حال؟')) return; }
+  }
+  DB.invoices.push({id:uid(),invoiceNo,supplier,desc,vehicleNo,vehicleDetails,projectId:projId,lineId,date,amount,tax,total});
+  tempInvVehicles=[];
+  // Add as transaction on project
+  if(projId&&lineId){
+    DB.transactions.push({id:uid(),projectId:projId,budgetLineId:lineId,vault:'cash',type:'out',amount,description:'فاتورة — '+supplier,date,payMethod:'cash'});
+  }
+  saveDB(); closeModal(); render();
+  showToast('✅ تم حفظ الفاتورة','#10b981');
+}
+
+function invoicesHTML(){
+  const invs=DB.invoices||[];
+  const total=invs.reduce((s,i)=>s+(i.amount||0),0);
+  const totalTax=invs.reduce((s,i)=>s+(i.tax||0),0);
+  const totalAll=invs.reduce((s,i)=>s+(i.total||0),0);
+  const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  const projOpts=(DB.projects||[]).map(p=>'<option value="'+p.id+'">'+p.name+'</option>').join('');
+  const monthOpts=months.map((m,i)=>'<option value="'+(i+1<10?'0'+(i+1):''+(i+1))+'">'+m+'</option>').join('');
+
+  return `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div style="font-weight:800;font-size:16px;">🧾 الفواتير</div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="exportInvoicesExcel()" class="btn btn-ghost btn-pill btn-sm">⬇ Excel</button>
+      <button onclick="importInvoicesExcel()" class="btn btn-ghost btn-pill btn-sm">⬆ استيراد Excel</button>
+      <input type="file" id="inv-excel-input" accept=".xlsx,.xls,.csv" style="display:none;" onchange="handleInvoiceImport(this)">
+      <button onclick="openModal('addInvoiceRow')" class="btn btn-gold btn-pill btn-sm">+ فاتورة جديدة</button>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;margin-bottom:14px;">
+    <input placeholder="🔍 بحث بالمورد أو الوصف" id="inv-filter-text" class="inp" style="font-size:12px;" oninput="renderInvTable()">
+    <select class="sel" id="inv-filter-proj" style="font-size:12px;" onchange="renderInvTable()">
+      <option value="">كل المشاريع</option>
+      ${projOpts}
+    </select>
+    <select class="sel" id="inv-filter-month" style="font-size:12px;" onchange="renderInvTable()">
+      <option value="">كل الأشهر</option>
+      ${monthOpts}
+    </select>
+    <button onclick="document.getElementById('inv-filter-text').value='';document.getElementById('inv-filter-proj').value='';document.getElementById('inv-filter-month').value='';renderInvTable();" class="btn btn-ghost btn-pill btn-sm">مسح</button>
+  </div>
+
+  <!-- Summary -->
+  <div class="grid3" style="margin-bottom:16px;">
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">إجمالي بدون ضريبة</div>
+      <div style="font-weight:800;font-size:16px;color:var(--indigo);">${fmt(total)} ${SAR}</div>
+    </div>
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">إجمالي الضريبة</div>
+      <div style="font-weight:800;font-size:16px;color:#f59e0b;">${fmt(totalTax)} ${SAR}</div>
+    </div>
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">الإجمالي شامل الضريبة</div>
+      <div style="font-weight:800;font-size:16px;color:#10b981;">${fmt(totalAll)} ${SAR}</div>
+    </div>
+  </div>
+
+  <!-- Monthly Chart -->
+  <div class="glass" style="padding:18px;margin-bottom:16px;">
+    <div style="font-weight:700;font-size:13px;margin-bottom:12px;">📈 المصاريف الشهرية</div>
+    <div style="display:flex;align-items:flex-end;gap:4px;height:80px;">
+      ${(()=>{
+        const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+        const year=new Date().getFullYear();
+        const data=months.map((m,i)=>{
+          const mn=i+1<10?'0'+(i+1):''+(i+1);
+          return (DB.invoices||[]).filter(inv=>(inv.date||'').includes(year+'-'+mn)).reduce((s,i)=>s+(i.amount||0),0);
+        });
+        const max=Math.max(...data,1);
+        return data.map((v,i)=>{
+          const h=Math.round((v/max)*60)+4;
+          const isNow=i===new Date().getMonth();
+          return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;">'+
+            '<div style="font-size:7px;color:var(--text4);">'+(v>0?fmt(v):'')+'</div>'+
+            '<div style="width:100%;height:'+h+'px;background:'+(isNow?'var(--gold)':'rgba(99,102,241,0.4)')+';border-radius:3px 3px 0 0;"></div>'+
+            '<div style="font-size:8px;color:var(--text4);">'+months[i].substring(0,3)+'</div>'+
+          '</div>';
+        }).join('');
+      })()}
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="glass" style="overflow:hidden;">
+    ${invs.length===0?'<div style="padding:40px;text-align:center;color:var(--text4);">لا توجد فواتير — أضف فاتورة جديدة</div>':`
+    <table class="tbl">
+      <thead><tr>
+        <th>رقم الفاتورة</th><th>المورد</th><th>وصف الخدمة</th><th>رقم السيارة</th>
+        <th>المشروع</th><th>البند</th><th>التاريخ</th>
+        <th>القيمة</th><th>الضريبة</th><th>الإجمالي</th><th></th>
+      </tr></thead>
+      <tbody id="inv-tbody"></tbody>
+    </table>`}
+  </div>
+  `;
+}
+
+
+function renderInvTable(){
+  const text=(document.getElementById('inv-filter-text')?.value||'').toLowerCase();
+  const projId=document.getElementById('inv-filter-proj')?.value||'';
+  const month=document.getElementById('inv-filter-month')?.value||'';
+  let invs=DB.invoices||[];
+  if(text) invs=invs.filter(i=>(i.supplier||'').toLowerCase().includes(text)||(i.desc||'').toLowerCase().includes(text)||(i.invoiceNo||'').toLowerCase().includes(text));
+  if(projId) invs=invs.filter(i=>i.projectId===projId);
+  if(month) invs=invs.filter(i=>{const d=i.date||''; return d.includes('-'+month+'-')||d.substring(5,7)===month;});
+  const tbody=document.getElementById('inv-tbody');
+  if(!tbody) return;
+  if(!invs.length){
+    tbody.innerHTML='<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--text4);">لا توجد نتائج</td></tr>';
+    return;
+  }
+  tbody.innerHTML=invs.map((inv)=>{
+    const proj=DB.projects.find(p=>p.id===inv.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
+    const realIdx=(DB.invoices||[]).indexOf(inv);
+    return '<tr>'+
+      '<td style="font-weight:600;">'+(inv.invoiceNo||'—')+'</td>'+
+      '<td>'+(inv.supplier||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(inv.desc||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(inv.vehicleNo||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+proj.name+'</td>'+
+      '<td style="color:var(--text3);">'+line.category+'</td>'+
+      '<td style="color:var(--text3);">'+(inv.date||'—')+'</td>'+
+      '<td style="font-weight:700;">'+fmt(inv.amount||0)+' '+SAR+'</td>'+
+      '<td style="color:#f59e0b;">'+fmt(inv.tax||0)+' '+SAR+'</td>'+
+      '<td style="font-weight:700;color:#10b981;">'+fmt(inv.total||0)+' '+SAR+'</td>'+
+      '<td><button onclick="deleteInvoiceRow('+realIdx+')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:14px;">🗑</button></td>'+
+    '</tr>';
+  }).join('');
+}
+
+function deleteInvoiceRow(idx){
+  if(!confirm('حذف الفاتورة؟')) return;
+  DB.invoices.splice(idx,1);
+  saveDB(); render();
+  showToast('تم الحذف','#f43f5e');
+}
+
+function exportInvoicesExcel(){
+  const invs=DB.invoices||[];
+  if(!invs.length) return showToast('لا توجد فواتير','#f43f5e');
+  const rows=[['رقم الفاتورة','المورد','وصف الخدمة','رقم السيارة','المشروع','البند','التاريخ','القيمة','الضريبة','الإجمالي']];
+  invs.forEach(inv=>{
+    const proj=DB.projects.find(p=>p.id===inv.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
+    rows.push([
+      inv.invoiceNo||'',
+      inv.supplier||'',
+      inv.desc||'',
+      inv.vehicleNo||'',
+      proj.name,
+      line.category,
+      inv.date||'',
+      inv.amount||0,
+      inv.tax||0,
+      inv.total||0
+    ]);
+  });
+  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='فواتير_'+today()+'.csv';
+  a.click();
+  showToast('✅ تم تصدير Excel','#10b981');
+}
+
+function importInvoicesExcel(){
+  document.getElementById('inv-excel-input').click();
+}
+
+function handleInvoiceImport(input){
+  const file=input.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const text=e.target.result;
+    const lines=text.split('\n').slice(1);
+    let count=0;
+    lines.forEach(line=>{
+      const cols=line.split(',');
+      if(cols.length<6) return;
+      const amount=parseFloat(cols[5])||0;
+      const tax=parseFloat(cols[6])||Math.round(amount*0.15*100)/100;
+      const total=parseFloat(cols[7])||amount+tax;
+      const projName=(cols[2]||'').trim();
+      const lineName=(cols[3]||'').trim();
+      const proj=DB.projects.find(p=>p.name===projName)||DB.projects[0]||{id:''};
+      const line2=DB.lines.find(l=>l.category===lineName&&l.projectId===proj.id)||DB.lines.find(l=>l.projectId===proj.id)||{id:''};
+      if(!amount) return;
+      DB.invoices.push({
+        id:uid(),
+        invoiceNo:(cols[0]||'').trim(),
+        supplier:(cols[1]||'').trim(),
+        projectId:proj.id,
+        lineId:line2.id,
+        date:(cols[4]||today()).trim(),
+        amount,tax,total
+      });
+      // Add as transaction
+      if(proj.id&&line2.id){
+        DB.transactions.push({id:uid(),projectId:proj.id,budgetLineId:line2.id,vault:'cash',type:'out',amount,description:'فاتورة — '+(cols[1]||'').trim(),date:(cols[4]||today()).trim(),payMethod:'cash'});
+      }
+      count++;
+    });
+    saveDB(); render();
+    showToast('✅ تم استيراد '+count+' فاتورة','#10b981');
+  };
+  reader.readAsText(file,'UTF-8');
+}
+
 function warehouseHTML(){
   const items = DB.items||[];
   const movements = DB.stockMovements||[];
@@ -2384,22 +2688,35 @@ function warehouseHTML(){
 /* ── SETTINGS ── */
 
 function empReportHTML(){
-  const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  if(!DB.employees||DB.employees.length===0) return `
+  <div style="font-weight:800;font-size:16px;margin-bottom:16px;">👤 تقرير الموظفين</div>
+  <div class="glass" style="padding:40px;text-align:center;color:var(--text4);">
+    <div style="font-size:40px;margin-bottom:12px;">👷</div>
+    <div>لا يوجد موظفون — أضف موظفين من الإعدادات</div>
+  </div>`;
+
   return `
   <div style="font-weight:800;font-size:16px;margin-bottom:16px;">👤 تقرير الموظفين</div>
-  <div class="glass" style="overflow:hidden;">
+  <div class="glass" style="overflow:hidden;margin-bottom:16px;">
     <table class="tbl">
       <thead><tr><th>الموظف</th><th>الوظيفة</th><th>عدد العهد</th><th>إجمالي العهد</th><th>المسوى</th><th>المفتوح</th></tr></thead>
       <tbody>
         ${DB.employees.map(e=>{
-          const custs=DB.custodies.filter(c=>c.employeeId===e.id);
-          const total=custs.reduce((s,c)=>s+c.amount,0);
-          const settled=custs.filter(c=>c.status==='settled').reduce((s,c)=>s+c.amount,0);
-          const open=custs.filter(c=>c.status!=='settled').reduce((s,c)=>s+c.amount,0);
+          const custs=(DB.custodies||[]).filter(c=>c.employeeId===e.id);
+          const total=custs.reduce((s,c)=>s+(c.amount||0),0);
+          const settled=custs.reduce((s,c)=>{
+            const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+            return s+invTotal+(c.returned||0);
+          },0);
+          const open=custs.filter(c=>c.status!=='settled').reduce((s,c)=>{
+            const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+            const diff=c.amount-invTotal-(c.returned||0);
+            return s+(diff>0?diff:0);
+          },0);
           return '<tr>'+
             '<td style="font-weight:700;">'+e.name+'</td>'+
             '<td style="color:var(--text3);">'+e.role+'</td>'+
-            '<td style="text-align:center;">'+custs.length+'</td>'+
+            '<td style="text-align:center;font-weight:700;">'+custs.length+'</td>'+
             '<td style="font-weight:700;color:var(--gold2);">'+fmt(total)+' '+SAR+'</td>'+
             '<td style="color:#10b981;font-weight:600;">'+fmt(settled)+' '+SAR+'</td>'+
             '<td style="color:'+(open>0?'#f43f5e':'#10b981')+';font-weight:700;">'+fmt(open)+' '+SAR+'</td>'+
@@ -2407,7 +2724,27 @@ function empReportHTML(){
         }).join('')}
       </tbody>
     </table>
-  </div>`;
+  </div>
+  ${(DB.custodies||[]).length>0?`
+  <div style="font-weight:700;font-size:14px;margin-bottom:12px;color:var(--text2);">📋 تفاصيل العهد المفتوحة</div>
+  <div class="glass" style="overflow:hidden;">
+    <table class="tbl">
+      <thead><tr><th>الموظف</th><th>المشروع</th><th>المبلغ</th><th>التاريخ</th><th>الحالة</th></tr></thead>
+      <tbody>
+        ${(DB.custodies||[]).filter(c=>c.status!=='settled').map(c=>{
+          const emp=empById(c.employeeId);
+          const proj=DB.projects.find(p=>p.id===c.projectId)||{name:'—'};
+          return '<tr>'+
+            '<td style="font-weight:700;">'+emp.name+'</td>'+
+            '<td style="color:var(--text3);">'+proj.name+'</td>'+
+            '<td style="color:#f59e0b;font-weight:700;">'+fmt(c.amount)+' '+SAR+'</td>'+
+            '<td style="color:var(--text3);">'+( c.issuedAt||'—')+'</td>'+
+            '<td><span style="background:rgba(244,63,94,0.1);color:#f43f5e;border-radius:50px;padding:3px 10px;font-size:11px;">مفتوح</span></td>'+
+          '</tr>';
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`:''}`;
 }
 
 function settingsHTML(){
@@ -2521,6 +2858,7 @@ function settingsHTML(){
 ═══════════════════════════════════ */
 function openModal(type,data){
   tempInvoices=[];
+  tempInvVehicles=[];
   if(type==='settle'){
     const c=DB.custodies.find(x=>x.id===data);
     if(c) tempInvoices=[...(c.invoices||[])];
@@ -2638,13 +2976,15 @@ function getModalHTML(type,data){
 
   if(type==='settle'){
     const c=DB.custodies.find(x=>x.id===data);
-    if(!c) return '<div>خطأ: العهدة مش موجودة</div>';
+    if(!c) return '<div style="padding:20px;text-align:center;color:#f43f5e;">العهدة مش موجودة</div>';
+    const proj=DB.projects.find(p=>p.id===c.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===c.budgetLineId)||{category:'—'};
     setTimeout(()=>refreshInvList(),80);
     return `
     <div class="sheet-title"><h3>تسوية عهدة — ${empById(c.employeeId).name}</h3>${close}</div>
     <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:11px 14px;margin-bottom:16px;font-size:12px;display:flex;justify-content:space-between;">
       <span style="color:var(--text3);">المبلغ: <strong style="color:#f59e0b;">${fmt(c.amount)} ${SAR}</strong></span>
-      <span style="color:var(--text3);">${projById(c.projectId).name} — ${lineById(c.budgetLineId).category}</span>
+      <span style="color:var(--text3);">${proj.name} — ${line.category}</span>
     </div>
     <div style="font-size:12px;font-weight:700;color:var(--indigo);margin-bottom:8px;">📄 الفواتير</div>
     <div id="inv-list"></div>
@@ -2663,7 +3003,8 @@ function getModalHTML(type,data){
       <span style="color:#34d399;font-weight:800;">✅ محدّث</span>
     </div>
     <input type="hidden" id="settle-cust-id" value="${c.id}">
-    <button class="btn btn-gold btn-full" onclick="saveSettle()">✓ حفظ التسوية</button>`;
+    <button class="btn btn-gold btn-full" onclick="saveSettle()" style="margin-bottom:10px;">✓ حفظ التسوية</button>
+    <button onclick="deleteCustody('${c.id}')" style="width:100%;background:rgba(244,63,94,0.08);border:1px solid rgba(244,63,94,0.2);border-radius:12px;padding:12px;color:#f43f5e;font-family:var(--font);font-size:13px;cursor:pointer;">🗑 حذف العهدة</button>`;
   }
 
   if(type==='addMonthlyBudget'){
@@ -2716,9 +3057,58 @@ function getModalHTML(type,data){
     <button class="btn btn-gold btn-full" onclick="saveEditLine()">✓ حفظ التعديل</button>`;
   }
 
+  if(type==='addInvoiceRow'){
+    const projOpts2=(DB.projects||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+    return `
+    <div class="sheet-title"><h3>🧾 إضافة فاتورة</h3>${close}</div>
+    <div class="form-row c2" style="margin-bottom:10px;">
+      <input placeholder="رقم الفاتورة" id="ni-no" class="inp">
+      <input type="date" id="ni-date" class="inp" value="${today()}">
+    </div>
+    <input placeholder="اسم المورد" id="ni-supplier" class="inp" style="margin-bottom:10px;" autofocus>
+    <input placeholder="وصف الخدمة / المنتج" id="ni-desc" class="inp" style="margin-bottom:10px;">
+    <div style="margin-bottom:10px;">
+      <div style="font-size:11px;color:var(--text4);margin-bottom:6px;">🚗 السيارات (اختياري — أضف كل سيارة مع مبلغها)</div>
+      <div id="ni-vehicles-list"></div>
+      <div style="display:grid;grid-template-columns:1fr 120px 30px;gap:6px;margin-top:6px;">
+        <input placeholder="رقم السيارة" id="ni-veh-no" class="inp" style="font-size:12px;">
+        <input type="number" placeholder="المبلغ" id="ni-veh-amt" class="inp" style="font-size:12px;text-align:center;" onkeydown="if(event.key===\'Enter\')addInvVehicle()">
+        <button onclick="addInvVehicle()" style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.3);border-radius:10px;color:#a5b4fc;cursor:pointer;font-size:18px;">+</button>
+      </div>
+    </div>
+    <div class="form-row c2" style="margin-bottom:10px;">
+      <div>
+        <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">المشروع</div>
+        <select class="sel" id="ni-proj" onchange="updateInvLines(this.value)">${projOpts2}</select>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">البند</div>
+        <select class="sel" id="ni-line">${(DB.lines||[]).filter(l=>l.projectId===(DB.projects||[])[0]?.id).map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join('')}</select>
+      </div>
+    </div>
+    <div class="form-row c2" style="margin-bottom:10px;">
+      <div>
+        <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">قيمة الفاتورة</div>
+        <input type="number" placeholder="0" id="ni-amount" class="inp" oninput="calcInvTax()">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">الضريبة (15%)</div>
+        <input type="number" placeholder="0" id="ni-tax" class="inp" oninput="calcInvTotal()">
+      </div>
+    </div>
+    <div style="margin-bottom:16px;">
+      <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">الإجمالي</div>
+      <input type="number" placeholder="0" id="ni-total" class="inp" style="font-weight:800;font-size:16px;text-align:center;">
+    </div>
+    <button class="btn btn-gold btn-full" onclick="saveInvoiceRow()">✓ حفظ الفاتورة</button>`;
+  }
+
   if(type==='addLine') return `
+    <div class="sheet-title"><h3>➕ إضافة بند</h3>${close}</div>
     <input type="hidden" id="nl-proj" value="${data||firstProj}">
-    <select class="sel" id="nl-cat" style="margin-bottom:12px;">${CATS.map(c=>`<option value="${c}">${CAT_IC[c]||''} ${c}</option>`).join('')}</select>
+    <div style="font-size:11px;color:var(--text4);margin-bottom:6px;">نوع البند</div>
+    <select class="sel" id="nl-cat" style="margin-bottom:10px;" onchange="toggleCustomCat(this.value)">${CATS.map(c=>`<option value="${c}">${CAT_IC[c]||''} ${c}</option>`).join('')}<option value="__custom__">✏️ بند مخصص...</option></select>
+    <input placeholder="اكتب اسم البند المخصص" id="nl-custom-cat" class="inp" style="margin-bottom:12px;display:none;">
     <div style="position:relative;margin-bottom:18px;">
       <input type="number" placeholder="المبلغ المعتمد" id="nl-amount" class="inp" style="text-align:center;font-size:18px;font-weight:700;padding:14px 50px;" autofocus>
       <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--text4);font-size:13px;">${SAR}</span>
@@ -3123,28 +3513,38 @@ function updateLineOpts(sid,pid){
   if(el) el.innerHTML=DB.lines.filter(l=>l.projectId===pid).map(l=>`<option value="${l.id}">${l.category}</option>`).join('');
 }
 function addInvoice(){
-  const desc=document.getElementById('new-inv-desc')?.value||'';
-  const amt=+document.getElementById('new-inv-amt')?.value||0;
-  const url=document.getElementById('new-inv-url')?.value||'';
-  if(!amt) return;
+  const descEl=document.getElementById('new-inv-desc');
+  const amtEl=document.getElementById('new-inv-amt');
+  const urlEl=document.getElementById('new-inv-url');
+  if(!descEl||!amtEl) return;
+  const desc=descEl.value||'';
+  const amt=parseFloat(amtEl.value)||0;
+  const url=urlEl?urlEl.value||'':'';
+  if(!amt||amt<=0){ showToast('أدخل المبلغ','#f43f5e'); return; }
   tempInvoices.push({desc,amount:amt,url});
-  document.getElementById('new-inv-desc').value='';
-  document.getElementById('new-inv-amt').value='';
-  document.getElementById('new-inv-url').value='';
-  refreshInvList(); updateSettleDiff();
+  descEl.value='';
+  amtEl.value='';
+  if(urlEl) urlEl.value='';
+  refreshInvList();
+  updateSettleDiff();
 }
 function removeInvoice(i){ tempInvoices.splice(i,1); refreshInvList(); updateSettleDiff(); }
 function refreshInvList(){
   const el=document.getElementById('inv-list'); if(!el) return;
-  el.innerHTML=tempInvoices.map((inv,i)=>`
-    <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="flex:1;font-size:12px;">${inv.desc||'فاتورة'}</span>
-        <span style="font-size:12px;font-weight:700;color:#a5b4fc;">${fmt(inv.amount)} ${SAR}</span>
-        <button onclick="removeInvoice(${i})" style="background:none;border:none;cursor:pointer;color:var(--text4);font-size:13px;">✕</button>
-      </div>
-      ${inv.url?'<a href="'+inv.url+'" target="_blank" style="font-size:10px;color:#38bdf8;">🔗 عرض الفاتورة</a>':''}
-    </div>`).join('');
+  if(tempInvoices.length===0){
+    el.innerHTML='<div style="padding:10px;text-align:center;color:var(--text4);font-size:12px;">لا توجد فواتير بعد</div>';
+    return;
+  }
+  el.innerHTML=tempInvoices.map((inv,i)=>
+    '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'+
+    '<div style="display:flex;align-items:center;gap:8px;">'+
+    '<span style="flex:1;font-size:12px;color:var(--text);">'+(inv.desc||'فاتورة')+'</span>'+
+    '<span style="font-size:12px;font-weight:700;color:#6366f1;">'+fmt(inv.amount)+' '+SAR+'</span>'+
+    '<button onclick="removeInvoice('+i+')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:16px;">✕</button>'+
+    '</div>'+
+    (inv.url?'<a href="'+inv.url+'" target="_blank" style="font-size:10px;color:#38bdf8;">🔗 عرض الفاتورة</a>':'')+
+    '</div>'
+  ).join('');
 }
 function updateSettleDiff(){
   const cid=document.getElementById('settle-cust-id')?.value;
@@ -3348,28 +3748,74 @@ function saveClaim(){
   DB.claims.push({id:uid(),projectId:document.getElementById('cl-proj').value,budgetLineId:document.getElementById('cl-line').value,supplier,invoiceNo:document.getElementById('cl-invno').value,invoiceUrl:document.getElementById('cl-url')?.value||'',amount,date:document.getElementById('cl-date').value,status:'pending'});
   saveDB();closeModal();showToast('تم تسجيل المطالبة ✓','#38bdf8');render();
 }
+function reopenCustody(id){
+  if(!confirm('إعادة فتح العهدة؟')) return;
+  const c=DB.custodies.find(x=>x.id===id);
+  if(c){ c.status='open'; c.invoices=[]; c.returned=0; }
+  saveDB(); render();
+  showToast('✅ تم إعادة فتح العهدة','#10b981');
+}
+
+function deleteCustody(id){
+  if(!confirm('هل تريد حذف هذه العهدة نهائياً؟')) return;
+  DB.custodies=DB.custodies.filter(c=>c.id!==id);
+  saveDB(); closeModal(); render();
+  showToast('✅ تم حذف العهدة','#10b981');
+}
+
 function saveSettle(){
   const custId=document.getElementById('settle-cust-id')?.value;
   const returned=+document.getElementById('settle-returned')?.value||0;
-  DB.custodies=DB.custodies.map(c=>{
-    if(c.id!==custId) return c;
-    const invTotal=tempInvoices.reduce((s,i)=>s+i.amount,0);
-    const diff=c.amount-invTotal-returned;
-    const status=Math.abs(diff)<0.5?'settled':invTotal+returned>0?'partial':'open';
-    return {...c,invoices:tempInvoices,returned,status};
+  const c=DB.custodies.find(x=>x.id===custId);
+  if(!c) return showToast('خطأ: العهدة مش موجودة','#f43f5e');
+
+  const invTotal=tempInvoices.reduce((s,i)=>s+i.amount,0);
+  const diff=c.amount-invTotal-returned;
+  const status=Math.abs(diff)<0.5?'settled':invTotal+returned>0?'partial':'open';
+
+  // Update custody - settle employee account only
+  DB.custodies=DB.custodies.map(x=>{
+    if(x.id!==custId) return x;
+    return {...x,invoices:tempInvoices,returned,status};
   });
+
+  // Only add returned cash as income transaction
   if(returned>0){
-    const c=DB.custodies.find(x=>x.id===custId);
-    if(c) DB.transactions.push({id:uid(),projectId:c.projectId,budgetLineId:c.budgetLineId,vault:c.vault,type:'in',amount:returned,description:`استرداد عهدة — ${empById(c.employeeId).name}`,date:today(),payMethod:'cash'});
+    DB.transactions.push({
+      id:uid(),
+      projectId:c.projectId,
+      budgetLineId:c.budgetLineId,
+      vault:c.vault||'cash',
+      type:'in',
+      amount:returned,
+      description:'استرداد عهدة — '+empById(c.employeeId).name,
+      date:today(),
+      payMethod:'cash'
+    });
   }
+
   tempInvoices=[];
-  saveDB();closeModal();showToast('تم تسوية العهدة ✓');render();
+  saveDB(); closeModal();
+  showToast('✅ تم تسوية حساب الموظف','#10b981');
+  render();
 }
+function toggleCustomCat(val){
+  const el=document.getElementById('nl-custom-cat');
+  if(!el) return;
+  el.style.display=val==='__custom__'?'block':'none';
+  if(val==='__custom__') el.focus();
+}
+
 function saveLine(){
   const amount=+document.getElementById('nl-amount')?.value;
   if(!amount) return showToast('أدخل المبلغ','#f43f5e');
-  DB.lines.push({id:uid(),projectId:document.getElementById('nl-proj').value,category:document.getElementById('nl-cat').value,approvedAmount:amount});
-  saveDB();closeModal();showToast('تم إضافة البند ✓');render();
+  let cat=document.getElementById('nl-cat')?.value;
+  if(cat==='__custom__'){
+    cat=document.getElementById('nl-custom-cat')?.value?.trim();
+    if(!cat) return showToast('أدخل اسم البند','#f43f5e');
+  }
+  DB.lines.push({id:uid(),projectId:document.getElementById('nl-proj').value,category:cat,approvedAmount:amount});
+  saveDB();closeModal();showToast('✅ تم إضافة البند','#10b981');render();
 }
 function saveMonthlyBudget(){
   const lineId=document.getElementById('mb-line-id')?.value;
