@@ -1294,8 +1294,22 @@ function dashHTML(){
   const alerts=getBudgetAlerts();
   const critAlerts=alerts.filter(a=>a.type==='danger');
 
+  // Calculate employee deficits (custody amount not yet covered by invoices/returns)
+  const DEFICIT_THRESHOLD=5000;
+  const deficits=[];
+  DB.employees.forEach(e=>{
+    const custs=DB.custodies.filter(c=>c.employeeId===e.id);
+    const totalOpen=custs.reduce((s,c)=>{
+      const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+      const diff=c.amount-invTotal-(c.returned||0);
+      return s+(diff>0?diff:0);
+    },0);
+    if(totalOpen>=DEFICIT_THRESHOLD) deficits.push({emp:e,amount:totalOpen});
+  });
+
   let alertBars='';
   if(critAlerts.length>0) alertBars+=`<div class="alert-bar" style="background:rgba(244,63,94,0.08);border:1px solid rgba(244,63,94,0.25);" onclick="switchTab('alerts')"><span class="notif-dot" style="background:#f43f5e;flex-shrink:0;"></span><span style="font-size:12px;color:#f87171;font-weight:700;">${critAlerts.length} بنود تجاوزت ${DANGER_PCT}% من ميزانيتها — اضغط للتفاصيل</span><span style="margin-right:auto;color:rgba(248,113,113,0.5);font-size:14px;">←</span></div>`;
+  if(deficits.length>0) alertBars+=`<div class="alert-bar" style="background:rgba(244,63,94,0.08);border:1px solid rgba(244,63,94,0.25);" onclick="switchTab('empReport')"><span>🔴</span><span style="font-size:12px;color:#f87171;font-weight:700;">${deficits.length} موظف عليه عجز فوق ${fmt(DEFICIT_THRESHOLD)} ${SAR} — ${deficits.map(d=>d.emp.name).join('، ')}</span><span style="margin-right:auto;color:rgba(248,113,113,0.5);font-size:14px;">←</span></div>`;
   if(openCusts>0) alertBars+=`<div class="alert-bar" style="background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.22);" onclick="switchTab('custs')"><span>⚠️</span><span style="font-size:12px;color:#fcd34d;font-weight:600;">${openCusts} عهد مفتوحة بدون تسوية</span><span style="margin-right:auto;color:rgba(252,211,77,0.4);font-size:14px;">←</span></div>`;
   if(pendClaims.length>0) alertBars+=`<div class="alert-bar" style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);" onclick="switchTab('suppliers')"><span>🏪</span><span style="font-size:12px;color:#38bdf8;font-weight:600;">${pendClaims.length} مطالبات موردين معلقة — ${fmt(pendVal)} ${SAR}</span><span style="margin-right:auto;color:rgba(56,189,248,0.4);font-size:14px;">←</span></div>`;
   if(pendExtracts.length>0) alertBars+=`<div class="alert-bar" style="background:rgba(212,168,67,0.07);border:1px solid rgba(212,168,67,0.22);" onclick="switchTab('extracts')"><span>📑</span><span style="font-size:12px;color:var(--gold2);font-weight:600;">${pendExtracts.length} مستخلصات معلقة — ${fmt(pendExtVal)} ${SAR}</span><span style="margin-right:auto;color:rgba(212,168,67,0.4);font-size:14px;">←</span></div>`;
@@ -1556,7 +1570,10 @@ function suppHTML(){
       <span style="font-weight:700;font-size:14px;">مطالبات الموردين</span>
       ${pending.length>0?'<span class="badge badge-blue">${pending.length} معلقة — ${fmt(pending.reduce((s,c)=>s+c.amount,0))} ${SAR}</span>':''}
     </div>
-    <button class="btn btn-blue btn-pill btn-sm" onclick="openModal('claim')">+ مطالبة مورد</button>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-ghost" style="font-size:12px;padding:7px 14px;border-radius:50px;" onclick="printClaimsReport()">🖨 طباعة</button>
+      <button class="btn btn-blue btn-pill btn-sm" onclick="openModal('claim')">+ مطالبة مورد</button>
+    </div>
   </div>
   ${DB.claims.length===0?'<div style="background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.07);border-radius:14px;padding:48px;text-align:center;color:var(--text4);font-size:13px;">لا توجد مطالبات</div>':`
   <div class="glass" style="overflow:hidden;">
@@ -1576,6 +1593,75 @@ function suppHTML(){
       </tbody>
     </table>
   </div>`}`;
+}
+
+function printClaimsReport(){
+  const claims=DB.claims||[];
+  if(!claims.length){ showToast('لا توجد مطالبات للطباعة','#f43f5e'); return; }
+
+  const pending=claims.filter(c=>c.status==='pending');
+  const paid=claims.filter(c=>c.status==='paid');
+  const totalPending=pending.reduce((s,c)=>s+(c.amount||0),0);
+  const totalPaid=paid.reduce((s,c)=>s+(c.amount||0),0);
+  const totalAll=claims.reduce((s,c)=>s+(c.amount||0),0);
+
+  const companyName=DB.companyName||COMPANY;
+  const logo=DB.logo?`<img src="${DB.logo}" style="width:55px;height:55px;object-fit:contain;border-radius:8px;">`:'<div style="width:55px;height:55px;background:#f5f0e8;border:2px solid #b8892a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:26px;">🏢</div>';
+
+  const rows=[...claims].reverse().map((c,idx)=>{
+    const proj=DB.projects.find(p=>p.id===c.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===c.budgetLineId)||{category:'—'};
+    return `<tr>
+      <td style="text-align:center;">${idx+1}</td>
+      <td style="text-align:center;">${c.date||'—'}</td>
+      <td>${c.supplier}</td>
+      <td style="text-align:center;">${c.invoiceNo||'—'}</td>
+      <td>${proj.name}</td>
+      <td>${line.category}</td>
+      <td style="text-align:center;font-weight:700;">${fmt(c.amount)} ${SAR}</td>
+      <td style="text-align:center;"><span style="background:${c.status==='paid'?'rgba(16,185,129,0.1)':'rgba(99,102,241,0.1)'};color:${c.status==='paid'?'#10b981':'#6366f1'};border-radius:50px;padding:2px 8px;font-size:10px;">${c.status==='paid'?'مدفوع':'معلق'}</span></td>
+    </tr>`;
+  }).join('');
+
+  const html=`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:'Cairo',sans-serif;padding:16mm 18mm;}
+    .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1a5276;padding-bottom:14px;margin-bottom:16px;}
+    .logo-area{display:flex;align-items:center;gap:12px;}
+    .company-name{font-size:17px;font-weight:900;color:#1a5276;}
+    .report-title{text-align:left;}
+    .report-title h2{font-size:18px;font-weight:900;color:#b8892a;}
+    .report-title p{font-size:11px;color:#666;margin-top:3px;}
+    table{width:100%;border-collapse:collapse;font-size:10.5px;margin-bottom:16px;}
+    thead tr{background:#1a5276;color:white;}
+    thead th{padding:7px 5px;text-align:right;font-weight:700;}
+    tbody tr:nth-child(even){background:#f8f9fa;}
+    tbody td{padding:6px 5px;border-bottom:1px solid #e8e8e8;}
+    .summary-box{border:2px solid #1a5276;border-radius:10px;padding:12px 18px;width:320px;}
+    .summary-row{display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid #eee;}
+    .summary-row:last-child{border-bottom:none;border-top:2px solid #1a5276;margin-top:4px;padding-top:8px;font-weight:900;font-size:14px;}
+  </style></head><body>
+  <div class="header">
+    <div class="logo-area">${logo}<div><div class="company-name">${companyName}</div></div></div>
+    <div class="report-title"><h2>مطالبات الموردين</h2><p>تاريخ الطباعة: ${today()}</p><p>عدد المطالبات: ${claims.length}</p></div>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>التاريخ</th><th>المورد</th><th>رقم الفاتورة</th><th>المشروع</th><th>البند</th><th>المبلغ</th><th>الحالة</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="summary-box">
+    <div class="summary-row"><span>معلقة:</span><span style="color:#6366f1;">${fmt(totalPending)} ${SAR}</span></div>
+    <div class="summary-row"><span>مدفوعة:</span><span style="color:#10b981;">${fmt(totalPaid)} ${SAR}</span></div>
+    <div class="summary-row"><span>الإجمالي:</span><span>${fmt(totalAll)} ${SAR}</span></div>
+  </div>
+  <script>window.onload=()=>window.print();<\/script>
+  </body></html>`;
+
+  const win=window.open('','_blank');
+  win.document.write(html);
+  win.document.close();
 }
 
 /* ── REPORTS ── */
@@ -3317,7 +3403,7 @@ function empReportHTML(){
   <div style="font-weight:800;font-size:16px;margin-bottom:16px;">👤 تقرير الموظفين</div>
   <div class="glass" style="overflow:hidden;margin-bottom:16px;">
     <table class="tbl">
-      <thead><tr><th>الموظف</th><th>الوظيفة</th><th>عدد العهد</th><th>إجمالي العهد</th><th>المسوى</th><th>المفتوح</th></tr></thead>
+      <thead><tr><th>الموظف</th><th>الوظيفة</th><th>عدد العهد</th><th>إجمالي العهد</th><th>المسوى</th><th>المفتوح</th><th></th></tr></thead>
       <tbody>
         ${DB.employees.map(e=>{
           const custs=(DB.custodies||[]).filter(c=>c.employeeId===e.id);
@@ -3332,12 +3418,13 @@ function empReportHTML(){
             return s+(diff>0?diff:0);
           },0);
           return '<tr>'+
-            '<td style="font-weight:700;">'+e.name+'</td>'+
+            '<td style="font-weight:700;cursor:pointer;color:var(--indigo);" onclick="openModal(\'employeeDetail\',\''+e.id+'\')">'+e.name+' 🔍</td>'+
             '<td style="color:var(--text3);">'+e.role+'</td>'+
             '<td style="text-align:center;font-weight:700;">'+custs.length+'</td>'+
             '<td style="font-weight:700;color:var(--gold2);">'+fmt(total)+' '+SAR+'</td>'+
             '<td style="color:#10b981;font-weight:600;">'+fmt(settled)+' '+SAR+'</td>'+
             '<td style="color:'+(open>0?'#f43f5e':'#10b981')+';font-weight:700;">'+fmt(open)+' '+SAR+'</td>'+
+            '<td><button onclick="printEmployeeStatement(\''+e.id+'\')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);border-radius:6px;padding:5px 10px;color:var(--gold2);font-size:11px;cursor:pointer;">🖨 طباعة</button></td>'+
           '</tr>';
         }).join('')}
       </tbody>
@@ -3363,6 +3450,104 @@ function empReportHTML(){
       </tbody>
     </table>
   </div>`:''}`;
+}
+
+function printEmployeeStatement(empId){
+  const e=DB.employees.find(x=>x.id===empId); if(!e) return;
+  const custs=(DB.custodies||[]).filter(c=>c.employeeId===empId);
+  if(!custs.length){ showToast('لا توجد عهد لهذا الموظف','#f43f5e'); return; }
+
+  const totalAmount=custs.reduce((s,c)=>s+(c.amount||0),0);
+  const totalSettled=custs.reduce((s,c)=>{
+    const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+    return s+invTotal+(c.returned||0);
+  },0);
+  const totalOpen=custs.reduce((s,c)=>{
+    const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+    const diff=c.amount-invTotal-(c.returned||0);
+    return s+(diff>0?diff:0);
+  },0);
+
+  const companyName=DB.companyName||COMPANY;
+  const logo=DB.logo?`<img src="${DB.logo}" style="width:55px;height:55px;object-fit:contain;border-radius:8px;">`:'<div style="width:55px;height:55px;background:#f5f0e8;border:2px solid #b8892a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:26px;">🏢</div>';
+
+  const rows=custs.map((c,idx)=>{
+    const proj=DB.projects.find(p=>p.id===c.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===c.budgetLineId)||{category:'—'};
+    const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+    const diff=c.amount-invTotal-(c.returned||0);
+    const statusText=Math.abs(diff)<0.5?'مسوى':diff>0?'مفتوح':'زيادة للموظف';
+    const statusColor=Math.abs(diff)<0.5?'#10b981':diff>0?'#f43f5e':'#6366f1';
+    return `<tr>
+      <td style="text-align:center;">${idx+1}</td>
+      <td>${proj.name}</td>
+      <td>${line.category}</td>
+      <td style="text-align:center;">${c.issuedAt||'—'}</td>
+      <td style="text-align:center;font-weight:700;">${fmt(c.amount)} ${SAR}</td>
+      <td style="text-align:center;color:#10b981;">${fmt(invTotal+(c.returned||0))} ${SAR}</td>
+      <td style="text-align:center;font-weight:700;color:${statusColor};">${fmt(Math.abs(diff))} ${SAR}</td>
+      <td style="text-align:center;"><span style="background:${statusColor}18;color:${statusColor};border-radius:50px;padding:2px 8px;font-size:10px;">${statusText}</span></td>
+    </tr>`;
+  }).join('');
+
+  const html=`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:'Cairo',sans-serif;padding:16mm 18mm;}
+    .header{border:2px solid #1a5276;border-radius:10px;padding:14px 18px;margin-bottom:16px;}
+    .header-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #ddd;}
+    .logo-area{display:flex;align-items:center;gap:12px;}
+    .company-name{font-size:17px;font-weight:900;color:#1a5276;}
+    .report-title h2{font-size:18px;font-weight:900;color:#b8892a;}
+    .report-title p{font-size:11px;color:#666;margin-top:3px;}
+    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    .info-item{background:#f8f9fa;border-radius:8px;padding:8px 12px;}
+    .info-label{font-size:9px;color:#888;margin-bottom:3px;}
+    .info-value{font-size:13px;font-weight:800;color:#1a5276;}
+    table{width:100%;border-collapse:collapse;font-size:10.5px;margin-bottom:16px;}
+    thead tr{background:#1a5276;color:white;}
+    thead th{padding:7px 5px;text-align:right;font-weight:700;}
+    tbody tr:nth-child(even){background:#f8f9fa;}
+    tbody td{padding:6px 5px;border-bottom:1px solid #e8e8e8;}
+    .summary-box{border:2px solid #1a5276;border-radius:10px;padding:12px 18px;width:320px;margin-bottom:30px;}
+    .summary-row{display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid #eee;}
+    .summary-row:last-child{border-bottom:none;border-top:2px solid #1a5276;margin-top:4px;padding-top:8px;font-weight:900;font-size:14px;}
+    .signatures{display:grid;grid-template-columns:1fr 1fr;gap:60px;margin-top:40px;}
+    .sig-box{text-align:center;}
+    .sig-space{height:55px;}
+    .sig-line{border-top:1.5px solid #333;padding-top:6px;}
+    .sig-title{font-size:12px;font-weight:800;color:#1a5276;}
+  </style></head><body>
+  <div class="header">
+    <div class="header-top">
+      <div class="logo-area">${logo}<div><div class="company-name">${companyName}</div></div></div>
+      <div class="report-title"><h2>كشف حساب موظف</h2><p>تاريخ الطباعة: ${today()}</p></div>
+    </div>
+    <div class="info-grid">
+      <div class="info-item"><div class="info-label">اسم الموظف</div><div class="info-value">${e.name}</div></div>
+      <div class="info-item"><div class="info-label">المسمى الوظيفي</div><div class="info-value">${e.role||'—'}</div></div>
+    </div>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>المشروع</th><th>البند</th><th>تاريخ الصرف</th><th>المبلغ</th><th>المسوى</th><th>الفرق</th><th>الحالة</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="summary-box">
+    <div class="summary-row"><span>إجمالي العهد المصروفة:</span><span style="color:#1a5276;">${fmt(totalAmount)} ${SAR}</span></div>
+    <div class="summary-row"><span>إجمالي المسوى:</span><span style="color:#10b981;">${fmt(totalSettled)} ${SAR}</span></div>
+    <div class="summary-row"><span>المتبقي على الموظف:</span><span style="color:#f43f5e;">${fmt(totalOpen)} ${SAR}</span></div>
+  </div>
+  <div class="signatures">
+    <div class="sig-box"><div class="sig-space"></div><div class="sig-line"><div class="sig-title">الموظف</div></div></div>
+    <div class="sig-box"><div class="sig-space"></div><div class="sig-line"><div class="sig-title">محاسب المشاريع</div></div></div>
+  </div>
+  <script>window.onload=()=>window.print();<\/script>
+  </body></html>`;
+
+  const win=window.open('','_blank');
+  win.document.write(html);
+  win.document.close();
 }
 
 function settingsHTML(){
@@ -3920,6 +4105,88 @@ function getModalHTML(type,data){
         '</div>';
       }).join('')}
     </div>`;
+  }
+
+  if(type==='employeeDetail'){
+    const e=DB.employees.find(x=>x.id===data); if(!e) return '<div style="padding:20px;text-align:center;">الموظف غير موجود</div>';
+    const custs=(DB.custodies||[]).filter(c=>c.employeeId===e.id);
+    
+    // Group by project
+    const byProject={};
+    custs.forEach(c=>{
+      if(!byProject[c.projectId]) byProject[c.projectId]=[];
+      byProject[c.projectId].push(c);
+    });
+
+    const totalAmount=custs.reduce((s,c)=>s+(c.amount||0),0);
+    const totalSettled=custs.reduce((s,c)=>{
+      const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+      return s+invTotal+(c.returned||0);
+    },0);
+    const totalOpen=custs.reduce((s,c)=>{
+      const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+      const diff=c.amount-invTotal-(c.returned||0);
+      return s+(diff>0?diff:0);
+    },0);
+
+    const projectBlocks=Object.keys(byProject).map(pid=>{
+      const proj=DB.projects.find(p=>p.id===pid)||{name:'بدون مشروع'};
+      const pcusts=byProject[pid];
+      const pTotal=pcusts.reduce((s,c)=>s+(c.amount||0),0);
+      const pSettled=pcusts.reduce((s,c)=>{
+        const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+        return s+invTotal+(c.returned||0);
+      },0);
+      const pOpen=pcusts.reduce((s,c)=>{
+        const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+        const diff=c.amount-invTotal-(c.returned||0);
+        return s+(diff>0?diff:0);
+      },0);
+      const statusColor=pOpen>0.5?'#f43f5e':'#10b981';
+      const statusText=pOpen>0.5?'عجز: '+fmt(pOpen)+' '+SAR:'✓ متطابق';
+
+      return `<div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div style="font-weight:800;font-size:13px;">${proj.name}</div>
+          <span style="background:${statusColor}18;color:${statusColor};border-radius:50px;padding:3px 10px;font-size:11px;font-weight:700;">${statusText}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+          <div style="text-align:center;"><div style="font-size:9px;color:var(--text4);">العهد</div><div style="font-weight:800;font-size:13px;color:var(--gold2);">${fmt(pTotal)} ${SAR}</div></div>
+          <div style="text-align:center;"><div style="font-size:9px;color:var(--text4);">المسوى</div><div style="font-weight:800;font-size:13px;color:#10b981;">${fmt(pSettled)} ${SAR}</div></div>
+          <div style="text-align:center;"><div style="font-size:9px;color:var(--text4);">المتبقي</div><div style="font-weight:800;font-size:13px;color:${pOpen>0.5?'#f43f5e':'#10b981'};">${fmt(pOpen)} ${SAR}</div></div>
+        </div>
+        ${pcusts.map(c=>{
+          const line=DB.lines.find(l=>l.id===c.budgetLineId)||{category:'—'};
+          const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+          const diff=c.amount-invTotal-(c.returned||0);
+          return '<div style="display:flex;justify-content:space-between;font-size:11px;padding:5px 0;border-top:1px solid var(--border);color:var(--text3);">'+
+            '<span>'+line.category+' · '+(c.issuedAt||'—')+'</span>'+
+            '<span style="font-weight:700;color:'+(Math.abs(diff)<0.5?'#10b981':'#f43f5e')+';">'+fmt(c.amount)+' '+SAR+' ('+(Math.abs(diff)<0.5?'مسوى':'متبقي '+fmt(diff))+')</span>'+
+          '</div>';
+        }).join('')}
+      </div>`;
+    }).join('');
+
+    return `
+    <div class="sheet-title"><h3>👤 ${e.name}</h3>${close}</div>
+    <div style="font-size:11px;color:var(--text4);margin-bottom:16px;">${e.role||''}</div>
+    <div class="grid3" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px;">
+      <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:12px;text-align:center;">
+        <div style="font-size:9px;color:var(--text4);margin-bottom:3px;">إجمالي العهد</div>
+        <div style="font-weight:800;font-size:16px;color:var(--gold2);">${fmt(totalAmount)} ${SAR}</div>
+      </div>
+      <div style="background:rgba(16,185,129,0.08);border-radius:10px;padding:12px;text-align:center;">
+        <div style="font-size:9px;color:var(--text4);margin-bottom:3px;">المسوى</div>
+        <div style="font-weight:800;font-size:16px;color:#10b981;">${fmt(totalSettled)} ${SAR}</div>
+      </div>
+      <div style="background:${totalOpen>0.5?'rgba(244,63,94,0.08)':'rgba(16,185,129,0.08)'};border-radius:10px;padding:12px;text-align:center;">
+        <div style="font-size:9px;color:var(--text4);margin-bottom:3px;">${totalOpen>0.5?'عجز عليك':'متطابق'}</div>
+        <div style="font-weight:800;font-size:16px;color:${totalOpen>0.5?'#f43f5e':'#10b981'};">${fmt(totalOpen)} ${SAR}</div>
+      </div>
+    </div>
+    <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;">📁 التفصيل حسب المشروع</div>
+    ${custs.length===0?'<div style="text-align:center;color:var(--text4);padding:30px;">لا توجد عهد لهذا الموظف</div>':projectBlocks}
+    <button class="btn btn-gold btn-full" style="margin-top:10px;" onclick="printEmployeeStatement('${e.id}')">🖨 طباعة الكشف الكامل</button>`;
   }
 
   if(type==='addLine') return `
