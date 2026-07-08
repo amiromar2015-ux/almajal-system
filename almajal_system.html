@@ -361,6 +361,7 @@ let DB = {
   companyName:'شركة مجموعة المجال العربي', // اسم الشركة
   fixedExpenses:[], // مصاريف ثابتة شهرية: {id, name, amount, dueDay, category, payments[]}
   tasks:[], // مهام وتذكيرات: {id, title, assignedTo, dueDate, status, notes}
+  deductStatements:[], // كشوف التخفيض
   purchaseRequests:[], // طلبات الشراء: {id, dept, itemName, quantity, date, status, notes}
   contracts:[],       // عقود الإيجار: {id, contractNo, tenant, asset, startDate, endDate, value, paymentType, payments[], status, notes}
   invoices:[],        // فواتير: {id, supplier, lineId, projectId, invoiceNo, date, amount, tax, total, note}
@@ -380,6 +381,7 @@ function loadDB(){
   if(!DB.invoices) DB.invoices=[];
   if(!DB.contracts) DB.contracts=[];
   if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
   if(!DB.fixedExpenses) DB.fixedExpenses=[];
   if(!DB.tasks) DB.tasks=[];
   if(!DB.items) DB.items=[];
@@ -425,6 +427,7 @@ async function fbLoad(){
     if(!DB.invoices) DB.invoices=[];
     if(!DB.contracts) DB.contracts=[];
     if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
     if(!DB.fixedExpenses) DB.fixedExpenses=[];
     if(!DB.tasks) DB.tasks=[];
     // تأكد من وجود حقول الكشوف الجديدة
@@ -2191,7 +2194,7 @@ function renderExtractsTable(){
   const projF=document.getElementById('ext-filter-proj')?.value||'';
   const deductF=document.getElementById('ext-filter-deduct')?.value||'';
   const locF=document.getElementById('ext-filter-loc')?.value||'';
-  let exts=[...(DB.extracts||[])].reverse();
+  let exts=[...(DB.deductStatements||[])].reverse();
   if(projF) exts=exts.filter(e=>e.projectId===projF);
   if(deductF) exts=exts.filter(e=>e.deductStatus===deductF);
   if(locF) exts=exts.filter(e=>e.location===locF);
@@ -2255,7 +2258,7 @@ function deleteExtract(id){
 
 
 function statementsHTML(){
-  const exts=DB.extracts||[];
+  const exts=DB.deductStatements||[];
   const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
   const projOpts2=(DB.projects||[]).map(p=>'<option value="'+p.id+'">'+p.name+'</option>').join('');
 
@@ -2267,8 +2270,8 @@ function statementsHTML(){
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
     <div style="font-weight:800;font-size:16px;">📝 كشوف التخفيض</div>
     <div style="display:flex;gap:8px;">
-      <button onclick="exportExtractsExcel()" class="btn btn-ghost btn-pill btn-sm">⬇ Excel</button>
-      <button onclick="openModal('addExtract')" class="btn btn-gold btn-pill btn-sm">+ كشف جديد</button>
+      <button onclick="exportDeductExcel()" class="btn btn-ghost btn-pill btn-sm">⬇ Excel</button>
+      <button onclick="openModal('addDeductStatement')" class="btn btn-gold btn-pill btn-sm">+ كشف جديد</button>
     </div>
   </div>
 
@@ -2322,7 +2325,7 @@ function renderStatementsTable(){
   const projF=document.getElementById('st-filter-proj')?.value||'';
   const deductF=document.getElementById('st-filter-deduct')?.value||'';
   const locF=document.getElementById('st-filter-loc')?.value||'';
-  let exts=[...(DB.extracts||[])].reverse();
+  let exts=[...(DB.deductStatements||[])].reverse();
   if(projF) exts=exts.filter(e=>e.projectId===projF);
   if(deductF) exts=exts.filter(e=>e.deductStatus===deductF);
   if(locF) exts=exts.filter(e=>e.location===locF);
@@ -2351,7 +2354,7 @@ function renderStatementsTable(){
       '<td><span style="background:'+deductColor+'18;color:'+deductColor+';border-radius:50px;padding:3px 8px;font-size:11px;font-weight:700;">'+(e.deductStatus||'جاري التخفيض')+'</span></td>'+
       '<td><span style="background:'+locColor+'18;color:'+locColor+';border-radius:50px;padding:3px 8px;font-size:11px;">'+(e.location||'—')+'</span></td>'+
       `<td><button onclick="printExtract('${e.id}')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);border-radius:6px;padding:4px 8px;color:var(--gold2);font-size:11px;cursor:pointer;">🖨</button> `+
-      `<button onclick="deleteExtract('${e.id}')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:13px;">🗑</button></td>`+
+      `<button onclick="deleteDeductStatement('${e.id}')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:13px;">🗑</button></td>`+
     '</tr>';
   }).join('');
 }
@@ -2749,6 +2752,7 @@ function saveInvoiceRow(){
   if(!DB.invoices) DB.invoices=[];
   if(!DB.contracts) DB.contracts=[];
   if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
   if(!DB.fixedExpenses) DB.fixedExpenses=[];
   if(!DB.tasks) DB.tasks=[];
   // Check duplicate invoice number
@@ -2817,6 +2821,7 @@ function saveContract(){
   if(!tenant) return showToast('أدخل اسم المستأجر','#f43f5e');
   if(!DB.contracts) DB.contracts=[];
   if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
   if(!DB.fixedExpenses) DB.fixedExpenses=[];
   if(!DB.tasks) DB.tasks=[];
   if(id){
@@ -3143,6 +3148,7 @@ function saveePurchaseReq(){
   if(!itemName) return showToast('أدخل اسم المنتج / الطلب','#f43f5e');
   if(!quantity) return showToast('أدخل الكمية','#f43f5e');
   if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
   if(!DB.fixedExpenses) DB.fixedExpenses=[];
   if(!DB.tasks) DB.tasks=[];
   DB.purchaseRequests.push({id:uid(),dept,itemName,quantity,date,status:'pending',notes});
@@ -3945,6 +3951,7 @@ function openModal(type,data){
     const c=DB.custodies.find(x=>x.id===data);
     if(c) tempInvoices=[...(c.invoices||[])];
   }
+  if(type==='addDeductStatement') setTimeout(()=>{const p=document.getElementById('ds-proj');if(p&&p.value)updateDSLines(p.value);},200);
   const overlay=document.createElement('div');
   overlay.className='overlay'; overlay.id='modal-overlay';
   overlay.onclick=e=>{ if(e.target===overlay) closeModal(); };
@@ -4475,6 +4482,42 @@ function getModalHTML(type,data){
     <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;">📁 التفصيل حسب المشروع</div>
     ${custs.length===0?'<div style="text-align:center;color:var(--text4);padding:30px;">لا توجد عهد لهذا الموظف</div>':projectBlocks}
     <button class="btn btn-gold btn-full" style="margin-top:10px;" onclick="printEmployeeStatement('${e.id}')">🖨 طباعة الكشف الكامل</button>`;
+  }
+
+  if(type==='addDeductStatement'){
+    const projOpts4=(DB.projects||[]).map(p=>'<option value="'+p.id+'">'+p.name+'</option>').join('');
+    const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    const monthOpts=months.map((m,i)=>'<option value="'+m+'" '+(new Date().getMonth()===i?'selected':'')+'>'+m+'</option>').join('');
+    const lineOpts2=(DB.lines||[]).filter(l=>l.projectId===(DB.projects[0]?.id||'')).map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join('');
+    return '<div class="sheet-title"><h3>📝 كشف تخفيض جديد</h3>'+close+'</div>'+
+    '<div class="form-row c2" style="margin-bottom:10px;">'+
+    '<input placeholder="رقم الكشف" id="ds-refnum" class="inp">'+
+    '<div style="position:relative;"><input type="number" placeholder="قيمة الكشف" id="ds-amount" class="inp" style="padding-left:40px;"><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text4);font-size:12px;">'+SAR+'</span></div>'+
+    '</div>'+
+    '<div class="form-row c2" style="margin-bottom:10px;">'+
+    '<div><div style="font-size:11px;color:var(--text4);margin-bottom:4px;">المشروع</div>'+
+    '<select class="sel" id="ds-proj" onchange="updateDSLines(this.value)">'+projOpts4+'</select></div>'+
+    '<div><div style="font-size:11px;color:var(--text4);margin-bottom:4px;">البند</div>'+
+    '<select class="sel" id="ds-line">'+lineOpts2+'</select></div>'+
+    '</div>'+
+    '<div class="form-row c2" style="margin-bottom:10px;">'+
+    '<div><div style="font-size:11px;color:var(--text4);margin-bottom:4px;">تاريخ الكشف</div><input type="date" id="ds-date" class="inp" value="'+today()+'"></div>'+
+    '<div><div style="font-size:11px;color:var(--text4);margin-bottom:4px;">تاريخ الإرسال</div><input type="date" id="ds-senddate" class="inp"></div>'+
+    '</div>'+
+    '<div class="form-row c2" style="margin-bottom:10px;">'+
+    '<input placeholder="رقم الإرسالية" id="ds-sendref" class="inp">'+
+    '<select class="sel" id="ds-custody-month">'+monthOpts+'</select>'+
+    '</div>'+
+    '<div class="form-row c2" style="margin-bottom:10px;">'+
+    '<select class="sel" id="ds-custody-type"><option value="كاش">كاش</option><option value="بطاقة بنكية">بطاقة بنكية</option><option value="تحويل بنكي">تحويل بنكي</option></select>'+
+    '<select class="sel" id="ds-deduct-status"><option value="جاري التخفيض">جاري التخفيض</option><option value="تم التخفيض">تم التخفيض</option></select>'+
+    '</div>'+
+    '<div style="font-size:11px;color:var(--text4);margin-bottom:5px;">موقف الكشف</div>'+
+    '<select class="sel" id="ds-location" style="margin-bottom:16px;">'+
+    '<option value="موجود لدى إدارة المشاريع">موجود لدى إدارة المشاريع</option>'+
+    '<option value="لدى الإدارة المالية">لدى الإدارة المالية</option>'+
+    '</select>'+
+    '<button class="btn btn-gold btn-full" onclick="saveDeductStatement()">✓ حفظ الكشف</button>';
   }
 
   if(type==='addLine') return `
@@ -5475,6 +5518,61 @@ function saveVehicleExpense(){
 /* ═══════════════════════════════════
    EXTRACTS FUNCTIONS
 ═══════════════════════════════════ */
+
+function updateDSLines(projId){
+  const el=document.getElementById('ds-line');
+  if(!el) return;
+  const lines=(DB.lines||[]).filter(l=>l.projectId===projId);
+  el.innerHTML=lines.length?lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join(''):'<option value="">لا توجد بنود</option>';
+}
+
+function saveDeductStatement(){
+  const refNum=document.getElementById('ds-refnum')?.value?.trim()||'';
+  const amount=parseFloat(document.getElementById('ds-amount')?.value)||0;
+  if(!refNum) return showToast('أدخل رقم الكشف','#f43f5e');
+  if(!amount) return showToast('أدخل قيمة الكشف','#f43f5e');
+  if(!DB.deductStatements) DB.deductStatements=[];
+  DB.deductStatements.push({
+    id:uid(), refNum,
+    projectId:document.getElementById('ds-proj')?.value||'',
+    lineId:document.getElementById('ds-line')?.value||'',
+    amount, date:document.getElementById('ds-date')?.value||today(),
+    sendDate:document.getElementById('ds-senddate')?.value||'',
+    sendRef:document.getElementById('ds-sendref')?.value?.trim()||'',
+    custodyMonth:document.getElementById('ds-custody-month')?.value||'',
+    custodyType:document.getElementById('ds-custody-type')?.value||'',
+    deductStatus:document.getElementById('ds-deduct-status')?.value||'جاري التخفيض',
+    location:document.getElementById('ds-location')?.value||'',
+  });
+  saveDB(); closeModal(); render();
+  showToast('✅ تم حفظ الكشف','#10b981');
+}
+
+function exportDeductExcel(){
+  const exts=DB.deductStatements||[];
+  if(!exts.length) return showToast('لا توجد كشوف','#f43f5e');
+  const rows=[['رقم الكشف','المشروع','البند','قيمة الكشف','تاريخ الكشف','تاريخ الإرسال','رقم الإرسالية','عهدة الشهر','نوع العهدة','حالة التخفيض','موقف الكشف']];
+  exts.forEach(e=>{
+    const proj=DB.projects.find(p=>p.id===e.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===e.lineId)||{category:'—'};
+    rows.push([e.refNum||'',proj.name,line.category,e.amount||0,e.date||'',e.sendDate||'',e.sendRef||'',e.custodyMonth||'',e.custodyType||'',e.deductStatus||'',e.location||'']);
+  });
+  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='كشوف_التخفيض_'+today()+'.csv';
+  a.click();
+  showToast('✅ تم التصدير','#10b981');
+}
+
+function deleteDeductStatement(id){
+  if(!confirm('حذف هذا الكشف؟')) return;
+  DB.deductStatements=DB.deductStatements.filter(e=>e.id!==id);
+  saveDB(); render();
+  showToast('تم الحذف','#f43f5e');
+}
+
 function updateExtractLines(projId){
   const lineEl=document.getElementById('ex-line');
   if(!lineEl) return;
