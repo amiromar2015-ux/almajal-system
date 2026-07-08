@@ -596,7 +596,7 @@ function renderTabs(){
     {k:'suppliers',lb:'🏪 الموردين'},
     {k:'extracts',lb:'📑 المستخلصات'},
     {k:'alerts',lb:'🔔 التنبيهات'+(alerts.length>0?' ('+alerts.length+')':'')},
-    {k:'statements',lb:'📝 الكشوف'},
+    {k:'statements',lb:'📝 كشوف التخفيض'},
     {k:'vehicles',lb:'🚗 السيارات والمعدات'},
     {k:'assets',lb:'🏷️ الأصول'},
     {k:'warehouse',lb:'📦 المخزن'},
@@ -641,7 +641,7 @@ function renderMain(){
     case 'suppliers':el.innerHTML=suppHTML(); setTimeout(renderClaimsTable,80); break;
     case 'alerts':   el.innerHTML=alertsHTML(); break;
     case 'reports':  el.innerHTML=reportsHTML(); break;
-    case 'statements': el.innerHTML=statementsHTML(); break;
+    case 'statements': el.innerHTML=statementsHTML(); setTimeout(renderStatementsTable,80); break;
     case 'extracts':   el.innerHTML=extractsHTML(); setTimeout(renderExtractsTable,80); break;
     case 'vehicles':   el.innerHTML=vehiclesHTML(); break;
     case 'assets':     el.innerHTML=assetsHTML(); break;
@@ -2291,79 +2291,107 @@ function deleteExtract(id){
 
 
 function statementsHTML(){
-  const stmts = DB.statements||[];
+  const exts=DB.extracts||[];
+  const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  const projOpts2=(DB.projects||[]).map(p=>'<option value="'+p.id+'">'+p.name+'</option>').join('');
+
+  const total=exts.reduce((s,e)=>s+(e.amount||0),0);
+  const deducted=exts.filter(e=>e.deductStatus==='تم التخفيض').reduce((s,e)=>s+(e.amount||0),0);
+  const pending=exts.filter(e=>e.deductStatus!=='تم التخفيض').reduce((s,e)=>s+(e.amount||0),0);
+
   return `
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-    <span style="font-weight:800;font-size:16px;">📝 كشوف الحساب</span>
-    <button onclick="openModal('newStatement')" class="btn btn-green btn-pill btn-sm">+ كشف جديد</button>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+    <div style="font-weight:800;font-size:16px;">📝 كشوف التخفيض</div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="exportExtractsExcel()" class="btn btn-ghost btn-pill btn-sm">⬇ Excel</button>
+      <button onclick="openModal('addExtract')" class="btn btn-gold btn-pill btn-sm">+ كشف جديد</button>
+    </div>
   </div>
 
-  ${stmts.length===0?`
-  <div style="background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.07);border-radius:14px;padding:48px;text-align:center;color:var(--text4);font-size:13px;">
-    لا توجد كشوف — اضغط "+ كشف جديد" للبدء
-  </div>`:'' + stmts.map(s=>{
-    const emp=empById(s.employeeId);
-    const proj=projById(s.projectId);
-    const total=s.items.reduce((a,i)=>a+i.amount,0);
-    const cust=s.custodyId?(DB.custodies||[]).find(c=>c.id===s.custodyId):null;
-    const diff=cust?cust.amount-total-s.returnedCash:0;
-    return `
-    <div class="card" style="margin-bottom:14px;border-color:rgba(16,185,129,0.2);">
-      <!-- Header -->
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.06);">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div style="width:40px;height:40px;border-radius:10px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);display:flex;align-items:center;justify-content:center;font-size:18px;">📝</div>
-          <div>
-            <div style="font-weight:800;font-size:14px;">${emp.name}</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px;">
-              ${proj.name} · ${s.date}
-              ${s.fileNum?' · <span style="color:var(--gold2);">ملف: ' + s.fileNum + '</span>':''}
-            </div>
-          </div>
-        </div>
-        <div style="text-align:left;">
-          <div style="font-weight:900;font-size:20px;color:#10b981;">${fmt(total)} <span style="font-size:11px;font-weight:400;">${SAR}</span></div>
-          <div style="font-size:10px;color:var(--text4);margin-top:2px;">${s.items.length} بند</div>
-        </div>
-      </div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;">
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">إجمالي الكشوف</div>
+      <div style="font-weight:800;font-size:16px;color:var(--gold2);">${fmt(total)} ${SAR}</div>
+    </div>
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">تم التخفيض</div>
+      <div style="font-weight:800;font-size:16px;color:#10b981;">${fmt(deducted)} ${SAR}</div>
+    </div>
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">جاري التخفيض</div>
+      <div style="font-weight:800;font-size:16px;color:#f59e0b;">${fmt(pending)} ${SAR}</div>
+    </div>
+  </div>
 
-      <!-- Items preview -->
-      <div style="margin-bottom:12px;">
-        ${s.items.slice(0,3).map(it=>`
-        <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px;">
-          <div>
-            <span style="color:#e2e8f0;">${it.desc}</span>
-            ${it.invNo?'<span style="color:var(--text4);margin-right:8px;">فاتورة: '+it.invNo+'</span>':''}
-          </div>
-          <span style="font-weight:700;color:#a5b4fc;">${fmt(it.amount)} ${SAR}</span>
-        </div>`).join('')}
-        ${s.items.length>3?'<div style="font-size:11px;color:var(--text4);padding-top:6px;">+ ${s.items.length-3} بنود أخرى...</div>':''}
-      </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
+    <select class="sel" id="st-filter-proj" style="font-size:12px;" onchange="renderStatementsTable()">
+      <option value="">كل المشاريع</option>
+      ${projOpts2}
+    </select>
+    <select class="sel" id="st-filter-deduct" style="font-size:12px;" onchange="renderStatementsTable()">
+      <option value="">كل حالات التخفيض</option>
+      <option value="تم التخفيض">تم التخفيض</option>
+      <option value="جاري التخفيض">جاري التخفيض</option>
+    </select>
+    <select class="sel" id="st-filter-loc" style="font-size:12px;" onchange="renderStatementsTable()">
+      <option value="">كل المواقف</option>
+      <option value="موجود لدى إدارة المشاريع">إدارة المشاريع</option>
+      <option value="لدى الإدارة المالية">الإدارة المالية</option>
+    </select>
+  </div>
 
-      <!-- Custody reconciliation -->
-      ${cust?`
-      <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;font-size:11px;">
-        <span style="color:var(--text3);">العهدة: <strong style="color:#f59e0b;">${fmt(cust.amount)} ${SAR}</strong></span>
-        <span style="color:var(--text3);">الكشف: <strong style="color:#10b981;">${fmt(total)} ${SAR}</strong></span>
-        <span style="color:var(--text3);">مرتجع: <strong style="color:#34d399;">${fmt(s.returnedCash||0)} ${SAR}</strong></span>
-        <span style="color:${Math.abs(diff)<0.5?'#34d399':diff>0?'#f87171':'#38bdf8'};font-weight:700;">
-          ${Math.abs(diff)<0.5?'✅ مسوى':diff>0?('ذمة: '+fmt(diff)+' '+SAR):('مستحق: '+fmt(Math.abs(diff))+' '+SAR)}
-        </span>
-      </div>`:''}
-
-      <!-- Actions -->
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button onclick="printStatement('${s.id}')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);border-radius:50px;padding:7px 16px;color:var(--gold2);font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;">🖨 طباعة الكشف</button>
-        ${cust&&cust.status!=='settled'?'<button onclick="settleFromStatement(\''+s.id+'\')" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:50px;padding:7px 16px;color:#34d399;font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;">✓ تسوية العهدة</button>':''}
-      </div>
-    </div>`;
-  }).join('')}`;
+  <div class="glass" style="overflow-x:auto;">
+    ${exts.length===0?'<div style="padding:40px;text-align:center;color:var(--text4);">لا توجد كشوف — أضف كشف جديد</div>':`
+    <table class="tbl" style="min-width:900px;">
+      <thead><tr>
+        <th>رقم الكشف</th><th>المشروع</th><th>البند</th>
+        <th>قيمة الكشف</th><th>تاريخ الكشف</th><th>تاريخ الإرسال</th>
+        <th>رقم الإرسالية</th><th>عهدة الشهر</th><th>نوع العهدة</th>
+        <th>حالة التخفيض</th><th>موقف الكشف</th><th></th>
+      </tr></thead>
+      <tbody id="st-tbody"></tbody>
+    </table>`}
+  </div>`;
 }
 
-/* ── VEHICLES ── */
-const VEH_TYPES = ['سيارة نقل','سيارة خفيفة','جرار نظافة','معدة ثقيلة','دراجة نارية','أخرى'];
-const VEH_STATUS = ['شغال','في الصيانة','متوقف'];
-const VEH_STATUS_COL = {'شغال':'#10b981','في الصيانة':'#f59e0b','متوقف':'#f43f5e'};
+function renderStatementsTable(){
+  const projF=document.getElementById('st-filter-proj')?.value||'';
+  const deductF=document.getElementById('st-filter-deduct')?.value||'';
+  const locF=document.getElementById('st-filter-loc')?.value||'';
+  let exts=[...(DB.extracts||[])].reverse();
+  if(projF) exts=exts.filter(e=>e.projectId===projF);
+  if(deductF) exts=exts.filter(e=>e.deductStatus===deductF);
+  if(locF) exts=exts.filter(e=>e.location===locF);
+
+  const tbody=document.getElementById('st-tbody');
+  if(!tbody) return;
+  if(!exts.length){
+    tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:20px;color:var(--text4);">لا توجد نتائج</td></tr>';
+    return;
+  }
+  tbody.innerHTML=exts.map(e=>{
+    const proj=DB.projects.find(p=>p.id===e.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===e.lineId)||{category:'—'};
+    const deductColor=e.deductStatus==='تم التخفيض'?'#10b981':'#f59e0b';
+    const locColor=e.location==='لدى الإدارة المالية'?'#6366f1':'#38bdf8';
+    return '<tr>'+
+      '<td style="font-weight:700;">'+(e.refNum||'—')+'</td>'+
+      '<td style="color:var(--text3);font-size:11px;">'+proj.name+'</td>'+
+      '<td style="color:var(--text3);font-size:11px;">'+line.category+'</td>'+
+      '<td style="font-weight:800;color:var(--gold2);">'+fmt(e.amount||0)+' '+SAR+'</td>'+
+      '<td style="color:var(--text3);">'+(e.date||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.sendDate||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.sendRef||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.custodyMonth||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.custodyType||'—')+'</td>'+
+      '<td><span style="background:'+deductColor+'18;color:'+deductColor+';border-radius:50px;padding:3px 8px;font-size:11px;font-weight:700;">'+(e.deductStatus||'جاري التخفيض')+'</span></td>'+
+      '<td><span style="background:'+locColor+'18;color:'+locColor+';border-radius:50px;padding:3px 8px;font-size:11px;">'+(e.location||'—')+'</span></td>'+
+      `<td><button onclick="printExtract('${e.id}')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);border-radius:6px;padding:4px 8px;color:var(--gold2);font-size:11px;cursor:pointer;">🖨</button> `+
+      `<button onclick="deleteExtract('${e.id}')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:13px;">🗑</button></td>`+
+    '</tr>';
+  }).join('');
+}
+
 
 function vehiclesHTML(){
   const vehicles = DB.vehicles||[];
