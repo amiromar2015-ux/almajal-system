@@ -410,6 +410,7 @@ async function fbLoad(){
     const d = JSON.parse(payload);
     if(!d.projects) return;
     DB = d;
+    // تأكد من وجود كل الحقول الجديدة
     if(!DB.monthlyBudgets) DB.monthlyBudgets=[];
     if(!DB.companyName) DB.companyName=COMPANY;
     if(!DB.items) DB.items=[];
@@ -421,6 +422,25 @@ async function fbLoad(){
     if(!DB.vehicleExpenses) DB.vehicleExpenses=[];
     if(!DB.claims) DB.claims=[];
     if(!DB.custodies) DB.custodies=[];
+    if(!DB.invoices) DB.invoices=[];
+    if(!DB.contracts) DB.contracts=[];
+    if(!DB.purchaseRequests) DB.purchaseRequests=[];
+    if(!DB.fixedExpenses) DB.fixedExpenses=[];
+    if(!DB.tasks) DB.tasks=[];
+    // تأكد من وجود حقول الكشوف الجديدة
+    DB.extracts=DB.extracts.map(e=>({
+      refNum:e.refNum||e.number||'',
+      lineId:e.lineId||'',
+      sendDate:e.sendDate||'',
+      sendRef:e.sendRef||'',
+      custodyMonth:e.custodyMonth||'',
+      custodyType:e.custodyType||'',
+      deductStatus:e.deductStatus||'جاري التخفيض',
+      location:e.location||'',
+      ...e
+    }));
+    // تأكد من وجود حقول المطالبات الجديدة
+    DB.claims=DB.claims.map(c=>({notes:c.notes||'',...c}));
     render();
     showToast('✅ تم تحميل البيانات من السحابة','#10b981');
   }catch(e){ console.log('Firebase load error:',e); }
@@ -622,7 +642,7 @@ function renderMain(){
     case 'alerts':   el.innerHTML=alertsHTML(); break;
     case 'reports':  el.innerHTML=reportsHTML(); break;
     case 'statements': el.innerHTML=statementsHTML(); break;
-    case 'extracts':   el.innerHTML=extractsHTML(); break;
+    case 'extracts':   el.innerHTML=extractsHTML(); setTimeout(renderExtractsTable,80); break;
     case 'vehicles':   el.innerHTML=vehiclesHTML(); break;
     case 'assets':     el.innerHTML=assetsHTML(); break;
     case 'fixedExp':   el.innerHTML=fixedExpHTML(); break;
@@ -1608,9 +1628,11 @@ function renderClaimsTable(){
       '<td style="font-weight:800;color:#38bdf8;">'+fmt(c.amount)+' <span style="font-size:9px;">'+SAR+'</span></td>'+
       '<td><span class="badge badge-'+(c.status==='paid'?'green':'blue')+'">'+(c.status==='paid'?'مدفوع':'معلق')+'</span></td>'+
       '<td>'+(c.status==='pending'?`<button onclick="payClaim('${c.id}')" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:8px;padding:5px 10px;color:#34d399;font-family:var(--font);font-weight:600;font-size:11px;cursor:pointer;">دفع ✓</button>`:'<span style="font-size:10px;color:var(--text4);">'+(c.paidDate||'')+'</span>')+'</td>'+
-      '<td style="white-space:nowrap;">'+
+      '<td style="font-size:11px;color:var(--text3);max-width:150px;">'+(c.notes||'—')+'</td>'+
+      '<td style="white-space:nowrap;display:flex;gap:4px;align-items:center;">'+
         (c.invoiceUrl?'<a href="'+c.invoiceUrl+'" target="_blank" style="font-size:11px;color:#38bdf8;text-decoration:none;">🔗</a> ':'')+
         `<button onclick="openModal('editClaim','${c.id}')" style="background:none;border:none;cursor:pointer;color:var(--gold2);font-size:13px;">✏️</button>`+
+        `<button onclick="deleteClaim('${c.id}')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:13px;">🗑</button>`+
       '</td>'+
     '</tr>';
   }).join('');
@@ -1648,7 +1670,7 @@ function suppHTML(){
 
   <!-- Filters -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
-    <input placeholder="🔍 بحث بالمورد..." id="cl-filter-text" class="inp" style="font-size:12px;" oninput="renderClaimsTable()">
+    <input placeholder="🔍 بحث بالمورد أو الملاحظات..." id="cl-filter-text" class="inp" style="font-size:12px;" oninput="renderClaimsTable()">
     <select class="sel" id="cl-filter-month" style="font-size:12px;" onchange="renderClaimsTable()">
       <option value="">كل الأشهر</option>
       ${['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'].map((m,i)=>'<option value="'+(i+1<10?'0'+(i+1):''+(i+1))+'">'+m+'</option>').join('')}
@@ -1681,6 +1703,205 @@ function suppHTML(){
       <tbody id="cl-tbody"></tbody>
     </table>
   </div>`}`;
+}
+
+
+function printManagementReport(){
+  const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  const now=new Date();
+  const thisMonth=now.getMonth()+1;
+  const thisYear=now.getFullYear();
+  const mn=thisMonth<10?'0'+thisMonth:''+thisMonth;
+  const monthName=months[thisMonth-1];
+
+  const companyName=DB.companyName||COMPANY;
+  const logo=DB.logo?'<img src="'+DB.logo+'" style="width:55px;height:55px;object-fit:contain;border-radius:8px;">'
+    :'<div style="width:55px;height:55px;background:#f5f0e8;border:2px solid #b8892a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:26px;">🏢</div>';
+
+  // Build per-project sections
+  let projectsHTML='';
+  let grandTotal=0, grandSettled=0, grandClaimsTotal=0;
+
+  DB.projects.forEach(proj=>{
+    // 1. Employee custodies for this project this month
+    const custs=DB.custodies.filter(c=>c.projectId===proj.id);
+    const projAmount=custs.reduce((s,c)=>s+(c.amount||0),0);
+    const projSettled=custs.reduce((s,c)=>{
+      const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
+      return s+invTotal+(c.returned||0);
+    },0);
+    const projDiff=projAmount-projSettled;
+
+    // 2. Invoices for this project this month
+    const invs=(DB.invoices||[]).filter(i=>i.projectId===proj.id&&((i.date||'').substring(5,7)===mn));
+    const invTotal=invs.reduce((s,i)=>s+(i.total||0),0);
+
+    // 3. Claims for this project this month
+    const claims=DB.claims.filter(c=>c.projectId===proj.id&&((c.date||'').substring(5,7)===mn));
+    const claimsTotal=claims.reduce((s,c)=>s+(c.amount||0),0);
+    const claimsPending=claims.filter(c=>c.status==='pending').reduce((s,c)=>s+(c.amount||0),0);
+
+    grandTotal+=projAmount;
+    grandSettled+=projSettled;
+    grandClaimsTotal+=claimsTotal;
+
+    // Invoice rows
+    const invRows=invs.map((inv,idx)=>{
+      const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
+      return '<tr>'+
+        '<td style="text-align:center;font-size:10px;">'+(idx+1)+'</td>'+
+        '<td style="font-size:10px;">'+(inv.invoiceNo||'—')+'</td>'+
+        '<td style="font-size:10px;">'+(inv.supplier||'—')+'</td>'+
+        '<td style="font-size:10px;">'+(inv.desc||'—')+'</td>'+
+        '<td style="font-size:10px;">'+(line.category)+'</td>'+
+        '<td style="font-size:10px;text-align:center;">'+(inv.date||'—')+'</td>'+
+        '<td style="font-size:10px;text-align:center;font-weight:700;">'+fmt(inv.amount||0)+'</td>'+
+        '<td style="font-size:10px;text-align:center;color:#d97706;">'+fmt(inv.tax||0)+'</td>'+
+        '<td style="font-size:10px;text-align:center;font-weight:800;color:#059669;">'+fmt(inv.total||0)+'</td>'+
+      '</tr>';
+    }).join('');
+
+    // Claims rows
+    const claimRows=claims.map((c,idx)=>{
+      const line=DB.lines.find(l=>l.id===c.budgetLineId)||{category:'—'};
+      return '<tr>'+
+        '<td style="text-align:center;font-size:10px;">'+(idx+1)+'</td>'+
+        '<td style="font-size:10px;">'+(c.supplier||'—')+'</td>'+
+        '<td style="font-size:10px;">'+(c.invoiceNo||'—')+'</td>'+
+        '<td style="font-size:10px;">'+(line.category)+'</td>'+
+        '<td style="font-size:10px;text-align:center;">'+(c.date||'—')+'</td>'+
+        '<td style="font-size:10px;text-align:center;font-weight:700;">'+fmt(c.amount)+'</td>'+
+        '<td style="text-align:center;"><span style="font-size:9px;padding:2px 6px;border-radius:50px;background:'+(c.status==='paid'?'#dcfce7':'#dbeafe')+';color:'+(c.status==='paid'?'#166534':'#1e40af')+';">'+(c.status==='paid'?'مدفوع':'معلق')+'</span></td>'+
+        '<td style="font-size:10px;color:#666;">'+(c.notes||'—')+'</td>'+
+      '</tr>';
+    }).join('');
+
+    projectsHTML+=`
+    <div style="margin-bottom:24px;page-break-inside:avoid;">
+      <div style="background:#1a5276;color:white;padding:8px 14px;border-radius:6px 6px 0 0;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-weight:800;font-size:13px;">${proj.name}</span>
+        <span style="font-size:11px;opacity:0.85;">${monthName} ${thisYear}</span>
+      </div>
+      <div style="border:1px solid #1a5276;border-top:none;border-radius:0 0 6px 6px;overflow:hidden;">
+        <!-- Summary Row -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);background:#f0f4f8;">
+          <div style="padding:10px;text-align:center;border-left:1px solid #ddd;">
+            <div style="font-size:9px;color:#666;margin-bottom:3px;">إجمالي العهد</div>
+            <div style="font-weight:800;font-size:13px;color:#b8892a;">${fmt(projAmount)} ر.س</div>
+          </div>
+          <div style="padding:10px;text-align:center;border-left:1px solid #ddd;">
+            <div style="font-size:9px;color:#666;margin-bottom:3px;">المسوى</div>
+            <div style="font-weight:800;font-size:13px;color:#059669;">${fmt(projSettled)} ر.س</div>
+          </div>
+          <div style="padding:10px;text-align:center;border-left:1px solid #ddd;">
+            <div style="font-size:9px;color:#666;margin-bottom:3px;">${Math.abs(projDiff)<0.5?'✓ مطابق':projDiff>0?'متبقي عليك':'زيادة'}</div>
+            <div style="font-weight:800;font-size:13px;color:${Math.abs(projDiff)<0.5?'#059669':projDiff>0?'#dc2626':'#7c3aed'};">${Math.abs(projDiff)<0.5?'صفر':fmt(Math.abs(projDiff))+' ر.س'}</div>
+          </div>
+          <div style="padding:10px;text-align:center;">
+            <div style="font-size:9px;color:#666;margin-bottom:3px;">مطالبات معلقة</div>
+            <div style="font-weight:800;font-size:13px;color:#dc2626;">${fmt(claimsPending)} ر.س</div>
+          </div>
+        </div>
+        
+        ${invs.length>0?`
+        <div style="padding:10px 14px 4px;background:#fafafa;border-top:1px solid #e5e7eb;">
+          <div style="font-size:11px;font-weight:700;color:#1a5276;margin-bottom:6px;">📋 الفواتير (${invs.length})</div>
+          <table style="width:100%;border-collapse:collapse;font-size:10px;">
+            <thead><tr style="background:#e8f0f8;">
+              <th style="padding:5px 4px;text-align:right;">#</th>
+              <th style="padding:5px 4px;text-align:right;">رقم الفاتورة</th>
+              <th style="padding:5px 4px;text-align:right;">المورد</th>
+              <th style="padding:5px 4px;text-align:right;">وصف الخدمة</th>
+              <th style="padding:5px 4px;text-align:right;">البند</th>
+              <th style="padding:5px 4px;text-align:right;">التاريخ</th>
+              <th style="padding:5px 4px;text-align:right;">القيمة</th>
+              <th style="padding:5px 4px;text-align:right;">ضريبة</th>
+              <th style="padding:5px 4px;text-align:right;">الإجمالي</th>
+            </tr></thead>
+            <tbody>${invRows}</tbody>
+          </table>
+          <div style="text-align:left;padding:4px 4px 0;font-size:10px;font-weight:700;color:#1a5276;">إجمالي الفواتير: ${fmt(invTotal)} ر.س</div>
+        </div>`:''}
+
+        ${claims.length>0?`
+        <div style="padding:10px 14px 4px;background:#fff9f0;border-top:1px solid #e5e7eb;">
+          <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:6px;">🏪 مطالبات الموردين (${claims.length})</div>
+          <table style="width:100%;border-collapse:collapse;font-size:10px;">
+            <thead><tr style="background:#fef3c7;">
+              <th style="padding:5px 4px;text-align:right;">#</th>
+              <th style="padding:5px 4px;text-align:right;">المورد</th>
+              <th style="padding:5px 4px;text-align:right;">رقم الفاتورة</th>
+              <th style="padding:5px 4px;text-align:right;">البند</th>
+              <th style="padding:5px 4px;text-align:right;">التاريخ</th>
+              <th style="padding:5px 4px;text-align:right;">المبلغ</th>
+              <th style="padding:5px 4px;text-align:right;">الحالة</th>
+              <th style="padding:5px 4px;text-align:right;">ملاحظات</th>
+            </tr></thead>
+            <tbody>${claimRows}</tbody>
+          </table>
+          <div style="text-align:left;padding:4px 4px 0;font-size:10px;font-weight:700;color:#92400e;">إجمالي المطالبات: ${fmt(claimsTotal)} ر.س</div>
+        </div>`:''}
+      </div>
+    </div>`;
+  });
+
+  const html=`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:'Cairo',sans-serif;padding:12mm 15mm;font-size:11px;}
+    @media print{@page{margin:8mm;}}
+  </style></head><body>
+  
+  <!-- Header -->
+  <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1a5276;padding-bottom:12px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      ${logo}
+      <div><div style="font-size:17px;font-weight:900;color:#1a5276;">${companyName}</div></div>
+    </div>
+    <div style="text-align:left;">
+      <div style="font-size:18px;font-weight:900;color:#b8892a;">التقرير الشهري للإدارة</div>
+      <div style="font-size:11px;color:#666;margin-top:3px;">${monthName} ${thisYear} — تاريخ الطباعة: ${today()}</div>
+    </div>
+  </div>
+
+  <!-- Grand Summary -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px;">
+    <div style="border:2px solid #1a5276;border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:10px;color:#666;margin-bottom:4px;">إجمالي العهد الكلي</div>
+      <div style="font-weight:900;font-size:16px;color:#1a5276;">${fmt(grandTotal)} ر.س</div>
+    </div>
+    <div style="border:2px solid #059669;border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:10px;color:#666;margin-bottom:4px;">إجمالي المسوى</div>
+      <div style="font-weight:900;font-size:16px;color:#059669;">${fmt(grandSettled)} ر.س</div>
+    </div>
+    <div style="border:2px solid #dc2626;border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:10px;color:#666;margin-bottom:4px;">إجمالي المطالبات</div>
+      <div style="font-weight:900;font-size:16px;color:#dc2626;">${fmt(grandClaimsTotal)} ر.س</div>
+    </div>
+  </div>
+
+  <!-- Projects -->
+  ${projectsHTML}
+
+  <!-- Signatures -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:60px;margin-top:30px;padding-top:20px;border-top:1px solid #ddd;">
+    <div style="text-align:center;">
+      <div style="height:50px;"></div>
+      <div style="border-top:1.5px solid #333;padding-top:6px;font-size:12px;font-weight:800;color:#1a5276;">محاسب المشاريع</div>
+    </div>
+    <div style="text-align:center;">
+      <div style="height:50px;"></div>
+      <div style="border-top:1.5px solid #333;padding-top:6px;font-size:12px;font-weight:800;color:#1a5276;">مدير المنطقة الغربية لقطاع الخدمات البيئية</div>
+    </div>
+  </div>
+
+  <script>window.onload=()=>window.print();<\/script>
+  </body></html>`;
+
+  const win=window.open('','_blank');
+  win.document.write(html);
+  win.document.close();
 }
 
 function printClaimsReport(){
@@ -1762,6 +1983,10 @@ function reportsHTML(){
   for(let i=2023;i<=new Date().getFullYear()+1;i++) years.push(i);
 
   return `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <div style="font-weight:800;font-size:16px;">📊 التقارير الشهرية</div>
+    <button onclick="printManagementReport()" class="btn btn-gold btn-pill btn-sm">🖨 التقرير الشهري للإدارة</button>
+  </div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;" class="no-print">
     <div style="font-weight:800;font-size:16px;">📊 التقارير الشهرية</div>
   <!-- Monthly Budget vs Actual -->
@@ -1932,172 +2157,139 @@ function reportsHTML(){
 
 /* ── EXTRACTS ── */
 function extractsHTML(){
-  const extracts = DB.extracts||[];
-  const selProj  = window._extFilterProj||'all';
-  const selStatus= window._extFilterStatus||'all';
+  const exts=DB.extracts||[];
+  const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  const projOpts2=(DB.projects||[]).map(p=>'<option value="'+p.id+'">'+p.name+'</option>').join('');
 
-  // Per-project stats
-  const projStats = DB.projects.map(p=>{
-    const pe = extracts.filter(e=>e.projectId===p.id);
-    const totalAmount  = pe.reduce((s,e)=>s+e.amount,0);
-    const paidAmount   = pe.filter(e=>e.status==='paid').reduce((s,e)=>s+e.amount,0);
-    const pendingAmount= pe.filter(e=>e.status==='pending').reduce((s,e)=>s+e.amount,0);
-    const remaining    = (p.contractValue||0) - totalAmount;
-    return {...p, pe, totalAmount, paidAmount, pendingAmount, remaining, count:pe.length};
-  });
-
-  const totalAll    = extracts.reduce((s,e)=>s+e.amount,0);
-  const totalPaid   = extracts.filter(e=>e.status==='paid').reduce((s,e)=>s+e.amount,0);
-  const totalPending= extracts.filter(e=>e.status==='pending').reduce((s,e)=>s+e.amount,0);
-  const totalSpent  = projTotals().reduce((s,p)=>s+p.spent,0);
-
-  // Filter
-  let filtered = [...extracts].reverse();
-  if(selProj!=='all')   filtered=filtered.filter(e=>e.projectId===selProj);
-  if(selStatus!=='all') filtered=filtered.filter(e=>e.status===selStatus);
+  const total=exts.reduce((s,e)=>s+(e.amount||0),0);
+  const deducted=exts.filter(e=>e.deductStatus==='تم التخفيض').reduce((s,e)=>s+(e.amount||0),0);
+  const pending=exts.filter(e=>e.deductStatus!=='تم التخفيض').reduce((s,e)=>s+(e.amount||0),0);
 
   return `
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-    <div style="font-weight:800;font-size:16px;">📑 المستخلصات</div>
-    <button onclick="openModal('addExtract')" class="btn btn-gold btn-pill btn-sm">+ إضافة مستخلص</button>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+    <div style="font-weight:800;font-size:16px;">📑 الكشوف</div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="exportExtractsExcel()" class="btn btn-ghost btn-pill btn-sm">⬇ Excel</button>
+      <button onclick="openModal('addExtract')" class="btn btn-gold btn-pill btn-sm">+ كشف جديد</button>
+    </div>
   </div>
 
-  <!-- KPIs -->
-  <div class="grid4" style="margin-bottom:18px;">
-    ${[
-      {lb:'إجمالي المستخلصات',v:totalAll,    c:'var(--gold2)'},
-      {lb:'مدفوع',             v:totalPaid,   c:'#10b981'},
-      {lb:'معلق',              v:totalPending,c:'#38bdf8'},
-      {lb:'إجمالي المصروفات', v:totalSpent,  c:'#f87171'},
-    ].map(k=>`
-    <div class="glass" style="padding:14px 16px;">
-      <div style="font-size:9px;color:var(--text4);letter-spacing:.8px;margin-bottom:6px;">${k.lb}</div>
-      <div style="font-weight:900;font-size:16px;color:${k.c};">${fmt(k.v)} <span style="font-size:9px;font-weight:400;">${SAR}</span></div>
-    </div>`).join('')}
+  <!-- Summary -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;">
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">إجمالي الكشوف</div>
+      <div style="font-weight:800;font-size:16px;color:var(--gold2);">${fmt(total)} ${SAR}</div>
+    </div>
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">تم التخفيض</div>
+      <div style="font-weight:800;font-size:16px;color:#10b981;">${fmt(deducted)} ${SAR}</div>
+    </div>
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">جاري التخفيض</div>
+      <div style="font-weight:800;font-size:16px;color:#f59e0b;">${fmt(pending)} ${SAR}</div>
+    </div>
   </div>
 
-  <!-- Revenue vs Cost -->
-  <div class="glass" style="padding:18px;margin-bottom:18px;">
-    <div style="font-weight:700;font-size:13px;color:var(--text2);margin-bottom:14px;">الإيرادات مقابل المصروفات — لكل مشروع</div>
-    ${projStats.map(p=>{
-      const contractPct = p.contractValue>0?pct(p.totalAmount,p.contractValue):0;
-      const profitLoss  = p.paidAmount - projTotals().find(x=>x.id===p.id)?.spent||0;
-      return `
-      <div style="margin-bottom:16px;padding:14px;background:rgba(255,255,255,0.03);border-radius:12px;border:1px solid ${p.color}18;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div style="width:8px;height:8px;border-radius:50%;background:${p.color};"></div>
-            <span style="font-weight:700;font-size:13px;">${p.name}</span>
-            <span style="font-size:10px;color:var(--text4);">${p.count} مستخلص</span>
-          </div>
-          <div style="display:flex;gap:14px;font-size:11px;">
-            <span style="color:var(--text3);">العقد: <strong style="color:var(--gold2);">${fmt(p.contractValue||0)} ${SAR}</strong></span>
-            <span style="color:${profitLoss>=0?'#10b981':'#f43f5e'};font-weight:700;">
-              ${profitLoss>=0?'▲ ربح':'▼ خسارة'}: ${fmt(Math.abs(profitLoss))} ${SAR}
-            </span>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
-          ${[
-            {lb:'إجمالي المستخلصات', v:p.totalAmount,   c:'var(--gold2)'},
-            {lb:'مدفوع',             v:p.paidAmount,    c:'#10b981'},
-            {lb:'معلق',              v:p.pendingAmount, c:'#38bdf8'},
-            {lb:'متبقي من العقد',    v:p.remaining,     c:p.remaining<0?'#f43f5e':'#a5b4fc'},
-          ].map(s=>`
-          <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:8px 10px;text-align:center;">
-            <div style="font-size:8px;color:var(--text4);letter-spacing:.6px;margin-bottom:3px;">${s.lb}</div>
-            <div style="font-weight:800;font-size:12px;color:${s.c};">${s.v<0?'-':''}${fmt(Math.abs(s.v))}</div>
-          </div>`).join('')}
-        </div>
-        <!-- Contract progress bar -->
-        <div style="margin-bottom:4px;">
-          <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text4);margin-bottom:4px;">
-            <span>استهلاك العقد</span>
-            <span style="color:${p.color};font-weight:700;">${contractPct}%</span>
-          </div>
-          <div style="height:5px;background:rgba(255,255,255,0.05);border-radius:99px;overflow:hidden;">
-            <div style="width:${Math.min(100,contractPct)}%;height:100%;background:linear-gradient(90deg,${p.color}88,${p.color});border-radius:99px;transition:width .5s;"></div>
-          </div>
-        </div>
-      </div>`;
-    }).join('')}
-  </div>
-
-  <!-- Filters + Table -->
-  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
-    <select onchange="window._extFilterProj=this.value;renderMain();" style="padding:7px 14px;border-radius:50px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:var(--text2);font-family:var(--font);font-size:12px;cursor:pointer;appearance:none;">
-      <option value="all">كل المشاريع</option>
-      ${DB.projects.map(p=>`<option value="${p.id}" ${selProj===p.id?'selected':''}>${p.name}</option>`).join('')}
+  <!-- Filters -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
+    <select class="sel" id="ext-filter-proj" style="font-size:12px;" onchange="renderExtractsTable()">
+      <option value="">كل المشاريع</option>
+      ${projOpts2}
     </select>
-    ${['all','pending','paid'].map(s=>`
-    <button onclick="window._extFilterStatus='${s}';renderMain();" style="padding:7px 14px;border-radius:50px;border:1px solid ${selStatus===s?'rgba(212,168,67,0.4)':'rgba(255,255,255,0.08)'};background:${selStatus===s?'rgba(212,168,67,0.12)':'none'};color:${selStatus===s?'var(--gold2)':'var(--text3)'};font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;">
-      ${s==='all'?'الكل':s==='pending'?'⏳ معلق':'✅ مدفوع'}
-    </button>`).join('')}
+    <select class="sel" id="ext-filter-deduct" style="font-size:12px;" onchange="renderExtractsTable()">
+      <option value="">كل حالات التخفيض</option>
+      <option value="تم التخفيض">تم التخفيض</option>
+      <option value="جاري التخفيض">جاري التخفيض</option>
+    </select>
+    <select class="sel" id="ext-filter-loc" style="font-size:12px;" onchange="renderExtractsTable()">
+      <option value="">كل مواقف الكشف</option>
+      <option value="موجود لدى إدارة المشاريع">إدارة المشاريع</option>
+      <option value="لدى الإدارة المالية">الإدارة المالية</option>
+    </select>
   </div>
 
-  ${filtered.length===0?`
-  <div style="background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.07);border-radius:14px;padding:48px;text-align:center;color:var(--text4);font-size:13px;">
-    ${extracts.length===0?`لا توجد مستخلصات — اضغط "+ إضافة مستخلص"`:'لا توجد نتائج بهذا الفلتر'}
-  </div>`:`
-  <div class="glass" style="overflow:hidden;">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>المشروع</th>
-          <th>رقم المستخلص</th>
-          <th>الشهر</th>
-          <th>تاريخ الاعتماد</th>
-          <th>تاريخ الصرف</th>
-          <th>المبلغ</th>
-          <th>الحالة</th>
-          <th>PDF</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        ${filtered.map(e=>{
-          const p=projById(e.projectId);
-          return `<tr>
-            <td>
-              <div style="display:flex;align-items:center;gap:7px;">
-                <div style="width:7px;height:7px;border-radius:50%;background:${p.color};flex-shrink:0;"></div>
-                <span style="font-size:12px;font-weight:600;">${p.name}</span>
-              </div>
-            </td>
-            <td style="font-weight:700;color:var(--gold2);">م-${e.number}</td>
-            <td style="font-size:12px;">${MONTHS_AR[(e.month||1)-1]} ${e.year||''}</td>
-            <td style="font-size:11px;color:var(--text3);">${e.approvalDate||'—'}</td>
-            <td style="font-size:11px;color:var(--text3);">${e.payDate||'—'}</td>
-            <td style="font-weight:800;font-size:14px;color:var(--gold2);">${fmt(e.amount)} <span style="font-size:9px;font-weight:400;">${SAR}</span></td>
-            <td>
-              <span class="badge ${e.status==='paid'?'badge-green':'badge-blue'}">
-                ${e.status==='paid'?'✅ مدفوع':'⏳ معلق'}
-              </span>
-            </td>
-            <td>
-              ${e.pdfUrl?'<a href="'+e.pdfUrl+'" target="_blank" style="font-size:11px;color:#38bdf8;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">🔗 PDF</a>':'<span style="color:var(--text4);font-size:11px;">—</span>'}
-            </td>
-            <td>
-              <div style="display:flex;gap:5px;">
-                ${e.status==='pending'?`<button onclick="payExtract('${e.id}')" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:6px;padding:4px 8px;color:#34d399;font-family:var(--font);font-size:11px;cursor:pointer;">دفع ✓</button>`:''}
-                <button onclick="deleteExtract('${e.id}')" style="background:none;border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:4px 8px;color:var(--text4);font-family:var(--font);font-size:11px;cursor:pointer;">✕</button>
-              </div>
-            </td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-      <tfoot>
-        <tr style="background:rgba(255,255,255,0.025);">
-          <td colspan="5" style="font-weight:800;color:var(--gold2);">الإجمالي (${filtered.length})</td>
-          <td style="font-weight:800;color:var(--gold2);">${fmt(filtered.reduce((s,e)=>s+e.amount,0))} ${SAR}</td>
-          <td colspan="3"></td>
-        </tr>
-      </tfoot>
-    </table>
-  </div>`}`;
+  <!-- Table -->
+  <div class="glass" style="overflow-x:auto;">
+    ${exts.length===0?'<div style="padding:40px;text-align:center;color:var(--text4);">لا توجد كشوف — أضف كشف جديد</div>':`
+    <table class="tbl" style="min-width:900px;">
+      <thead><tr>
+        <th>رقم الكشف</th><th>المشروع</th><th>البند</th>
+        <th>قيمة الكشف</th><th>تاريخ الكشف</th><th>تاريخ الإرسال</th>
+        <th>رقم الإرسالية</th><th>عهدة الشهر</th><th>نوع العهدة</th>
+        <th>حالة التخفيض</th><th>موقف الكشف</th><th></th>
+      </tr></thead>
+      <tbody id="ext-tbody"></tbody>
+    </table>`}
+  </div>`;
 }
 
-/* ── STATEMENTS ── */
+function renderExtractsTable(){
+  const projF=document.getElementById('ext-filter-proj')?.value||'';
+  const deductF=document.getElementById('ext-filter-deduct')?.value||'';
+  const locF=document.getElementById('ext-filter-loc')?.value||'';
+  let exts=[...(DB.extracts||[])].reverse();
+  if(projF) exts=exts.filter(e=>e.projectId===projF);
+  if(deductF) exts=exts.filter(e=>e.deductStatus===deductF);
+  if(locF) exts=exts.filter(e=>e.location===locF);
+
+  const tbody=document.getElementById('ext-tbody');
+  if(!tbody) return;
+  if(!exts.length){
+    tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:20px;color:var(--text4);">لا توجد نتائج</td></tr>';
+    return;
+  }
+  tbody.innerHTML=exts.map(e=>{
+    const proj=DB.projects.find(p=>p.id===e.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===e.lineId)||{category:'—'};
+    const realIdx=(DB.extracts||[]).indexOf(DB.extracts.find(x=>x.id===e.id));
+    const deductColor=e.deductStatus==='تم التخفيض'?'#10b981':'#f59e0b';
+    const locColor=e.location==='لدى الإدارة المالية'?'#6366f1':'#38bdf8';
+    return '<tr>'+
+      '<td style="font-weight:700;">'+(e.refNum||'—')+'</td>'+
+      '<td style="color:var(--text3);font-size:11px;">'+proj.name+'</td>'+
+      '<td style="color:var(--text3);font-size:11px;">'+line.category+'</td>'+
+      '<td style="font-weight:800;color:var(--gold2);">'+fmt(e.amount||0)+' '+SAR+'</td>'+
+      '<td style="color:var(--text3);">'+(e.date||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.sendDate||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.sendRef||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.custodyMonth||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.custodyType||'—')+'</td>'+
+      '<td><span style="background:'+deductColor+'18;color:'+deductColor+';border-radius:50px;padding:3px 8px;font-size:11px;font-weight:700;">'+(e.deductStatus||'جاري التخفيض')+'</span></td>'+
+      '<td><span style="background:'+locColor+'18;color:'+locColor+';border-radius:50px;padding:3px 8px;font-size:11px;">'+(e.location||'—')+'</span></td>'+
+      '<td style="white-space:nowrap;">'+
+        `<button onclick="printExtract('${e.id}')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);border-radius:6px;padding:4px 8px;color:var(--gold2);font-size:11px;cursor:pointer;">🖨</button> `+
+        `<button onclick="deleteExtract('${e.id}')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:13px;">🗑</button>`+
+      '</td>'+
+    '</tr>';
+  }).join('');
+}
+
+function exportExtractsExcel(){
+  const exts=DB.extracts||[];
+  if(!exts.length) return showToast('لا توجد كشوف','#f43f5e');
+  const rows=[['رقم الكشف','المشروع','البند','قيمة الكشف','تاريخ الكشف','تاريخ الإرسال','رقم الإرسالية','عهدة الشهر','نوع العهدة','حالة التخفيض','موقف الكشف']];
+  exts.forEach(e=>{
+    const proj=DB.projects.find(p=>p.id===e.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===e.lineId)||{category:'—'};
+    rows.push([e.refNum||'',proj.name,line.category,e.amount||0,e.date||'',e.sendDate||'',e.sendRef||'',e.custodyMonth||'',e.custodyType||'',e.deductStatus||'',e.location||'']);
+  });
+  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='الكشوف_'+today()+'.csv';
+  a.click();
+  showToast('✅ تم التصدير','#10b981');
+}
+
+function deleteExtract(id){
+  if(!confirm('حذف هذا الكشف؟')) return;
+  DB.extracts=DB.extracts.filter(e=>e.id!==id);
+  saveDB(); render();
+  showToast('تم الحذف','#f43f5e');
+}
+
+
 function statementsHTML(){
   const stmts = DB.statements||[];
   return `
@@ -3549,11 +3741,8 @@ function printEmployeeStatement(empId){
     const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
     return s+invTotal+(c.returned||0);
   },0);
-  const totalOpen=custs.reduce((s,c)=>{
-    const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
-    const diff=c.amount-invTotal-(c.returned||0);
-    return s+(diff>0?diff:0); // فقط العجز الحقيقي، مش الزيادة
-  },0);
+  // الفرق الحقيقي = العهدة - المسوى (موجب = متبقي عليك، سالب = زيادة صرفتها)
+  const balanceDiff=totalAmount-totalSettled;
 
   const companyName=DB.companyName||COMPANY;
   const logo=DB.logo?`<img src="${DB.logo}" style="width:55px;height:55px;object-fit:contain;border-radius:8px;">`:'<div style="width:55px;height:55px;background:#f5f0e8;border:2px solid #b8892a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:26px;">🏢</div>';
@@ -3563,9 +3752,9 @@ function printEmployeeStatement(empId){
     const line=DB.lines.find(l=>l.id===c.budgetLineId)||{category:'—'};
     const invTotal=(c.invoices||[]).reduce((a,i)=>a+(i.amount||0),0);
     const diff=c.amount-invTotal-(c.returned||0);
-    const statusText=Math.abs(diff)<0.5?'✓ مسوى':diff>0?'متبقي عليك':'✓ مسوى';
-    const statusColor=Math.abs(diff)<0.5?'#10b981':diff>0?'#f43f5e':'#10b981';
-    const diffDisplay=diff>0?fmt(diff)+' '+SAR:'—';
+    const statusText=Math.abs(diff)<0.5?'✓ مسوى':diff>0?'متبقي عليك':'🔵 زيادة';
+    const statusColor=Math.abs(diff)<0.5?'#10b981':diff>0?'#f43f5e':'#6366f1';
+    const diffDisplay=Math.abs(diff)<0.5?'—':fmt(Math.abs(diff))+' '+SAR;
     return `<tr>
       <td style="text-align:center;">${idx+1}</td>
       <td>${proj.name}</td>
@@ -3624,7 +3813,7 @@ function printEmployeeStatement(empId){
   <div class="summary-box">
     <div class="summary-row"><span>إجمالي العهد المصروفة:</span><span style="color:#1a5276;">${fmt(totalAmount)} ${SAR}</span></div>
     <div class="summary-row"><span>إجمالي الفواتير المسواة:</span><span style="color:#10b981;">${fmt(totalSettled)} ${SAR}</span></div>
-    <div class="summary-row"><span>${totalOpen>0.5?'🔴 المتبقي عليك (عجز):':'✅ الحساب مطابق'}</span><span style="color:${totalOpen>0.5?'#f43f5e':'#10b981'};">${totalOpen>0.5?fmt(totalOpen)+' '+SAR:'صفر'}</span></div>
+    <div class="summary-row"><span>${Math.abs(balanceDiff)<0.5?'✅ الحساب مطابق':balanceDiff>0?'🔴 متبقي عليك:':'🔵 زيادة صرفتها:'}</span><span style="color:${Math.abs(balanceDiff)<0.5?'#10b981':balanceDiff>0?'#f43f5e':'#6366f1'};">${Math.abs(balanceDiff)<0.5?'صفر':fmt(Math.abs(balanceDiff))+' '+SAR}</span></div>
   </div>
   <div class="signatures">
     <div class="sig-box"><div class="sig-space"></div><div class="sig-line"><div class="sig-title">الموظف</div></div></div>
@@ -3868,6 +4057,7 @@ function getModalHTML(type,data){
       <input type="number" placeholder="المبلغ" id="ec-amount" class="inp" style="padding-left:50px;" value="${c.amount||''}">
       <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--text4);font-size:12px;">${SAR}</span>
     </div>
+    <textarea placeholder="ملاحظات / متابعة" id="ec-notes" class="inp" style="margin-bottom:16px;resize:vertical;min-height:70px;">${c.notes||''}</textarea>
     <input type="hidden" id="ec-id" value="${c.id||''}">
     <button class="btn btn-gold btn-full" onclick="saveEditClaim()">✓ حفظ التعديل</button>`;
   }
@@ -3885,10 +4075,11 @@ function getModalHTML(type,data){
     <input placeholder="اسم المورد" id="cl-supplier" class="inp" style="margin-bottom:10px;">
     <input placeholder="رقم الفاتورة (اختياري)" id="cl-invno" class="inp" style="margin-bottom:10px;">
     <input type="date" id="cl-date" class="inp" style="margin-bottom:10px;" value="${today()}">
-    <div style="position:relative;margin-bottom:18px;">
+    <div style="position:relative;margin-bottom:10px;">
       <input placeholder="رابط الفاتورة على Google Drive (اختياري)" id="cl-url" class="inp" style="padding-left:36px;">
       <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;">🔗</span>
     </div>
+    <textarea placeholder="ملاحظات / متابعة (مثال: تم الإرسال للمحاسبة، في انتظار الموافقة...)" id="cl-notes" class="inp" style="margin-bottom:18px;resize:vertical;min-height:70px;"></textarea>
     <button class="btn btn-blue btn-full" onclick="saveClaim()">✓ تسجيل المطالبة</button>`;
 
   if(type==='settle'){
@@ -4443,60 +4634,60 @@ function getModalHTML(type,data){
     <button class="btn ${btnClass} btn-full" onclick="saveVehicleExpense()">${btnText}</button>`;
   }
 
-  if(type==='addExtract') return `
-    <div class="sheet-title"><h3>📑 إضافة مستخلص</h3>${close}</div>
+  if(type==='addExtract'){
+    const projOpts3=(DB.projects||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+    const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    const monthOpts=months.map((m,i)=>`<option value="${m}" ${new Date().getMonth()===i?'selected':''}>${m}</option>`).join('');
+    return `
+    <div class="sheet-title"><h3>📑 إضافة كشف</h3>${close}</div>
     <div class="form-row c2" style="margin-bottom:10px;">
-      <div>
-        <div style="font-size:10px;color:var(--text4);margin-bottom:5px;">المشروع</div>
-        <select class="sel" id="ex-proj">${projOpts}</select>
+      <input placeholder="رقم الكشف" id="ex-refnum" class="inp">
+      <div style="position:relative;">
+        <input type="number" placeholder="قيمة الكشف" id="ex-amount" class="inp" style="padding-left:40px;">
+        <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text4);font-size:12px;">${SAR}</span>
       </div>
-      <div>
-        <div style="font-size:10px;color:var(--text4);margin-bottom:5px;">رقم المستخلص</div>
-        <input type="number" placeholder="1" id="ex-num" class="inp" min="1">
-      </div>
-    </div>
-    <div class="form-row c2" style="margin-bottom:10px;">
-      <div>
-        <div style="font-size:10px;color:var(--text4);margin-bottom:5px;">الشهر</div>
-        <select class="sel" id="ex-month">
-          ${MONTHS_AR.map((m,i)=>`<option value="${i+1}" ${new Date().getMonth()===i?'selected':''}>${m}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <div style="font-size:10px;color:var(--text4);margin-bottom:5px;">السنة</div>
-        <select class="sel" id="ex-year">
-          ${[2023,2024,2025,2026].map(y=>`<option value="${y}" ${new Date().getFullYear()===y?'selected':''}>${y}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <div style="position:relative;margin-bottom:12px;">
-      <input type="number" placeholder="0.00" id="ex-amount" class="inp inp-lg" autofocus>
-      <span style="position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--text4);font-size:14px;font-weight:700;">${SAR}</span>
     </div>
     <div class="form-row c2" style="margin-bottom:10px;">
       <div>
-        <div style="font-size:10px;color:var(--text4);margin-bottom:5px;">تاريخ الاعتماد</div>
-        <input type="date" id="ex-approval" class="inp" value="${today()}">
+        <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">المشروع</div>
+        <select class="sel" id="ex-proj" onchange="updateExtractLines(this.value)">${projOpts3}</select>
       </div>
       <div>
-        <div style="font-size:10px;color:var(--text4);margin-bottom:5px;">تاريخ الصرف (لو مدفوع)</div>
-        <input type="date" id="ex-paydate" class="inp">
+        <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">البند</div>
+        <select class="sel" id="ex-line"></select>
       </div>
     </div>
-    <div style="position:relative;margin-bottom:12px;">
-      <input placeholder="رابط PDF المستخلص على Google Drive (اختياري)" id="ex-pdf" class="inp" style="padding-left:36px;">
-      <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;">🔗</span>
-    </div>
-    <div style="margin-bottom:18px;">
-      <div style="font-size:11px;color:var(--text3);font-weight:600;margin-bottom:8px;">الحالة</div>
-      <div class="seg" style="grid-template-columns:1fr 1fr;">
-        <button onclick="setSeg('ex-status','pending',this)" class="seg-btn" style="background:rgba(56,189,248,0.15);color:#38bdf8;">⏳ معلق</button>
-        <button onclick="setSeg('ex-status','paid',this)" class="seg-btn">✅ مدفوع</button>
+    <div class="form-row c2" style="margin-bottom:10px;">
+      <div>
+        <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">تاريخ الكشف</div>
+        <input type="date" id="ex-date" class="inp" value="${today()}">
       </div>
-      <input type="hidden" id="ex-status" value="pending">
+      <div>
+        <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">تاريخ الإرسال</div>
+        <input type="date" id="ex-senddate" class="inp">
+      </div>
     </div>
-    <input placeholder="ملاحظات (اختياري)" id="ex-notes" class="inp" style="margin-bottom:18px;">
-    <button class="btn btn-gold btn-full" onclick="saveExtract()">✓ حفظ المستخلص</button>`;
+    <div class="form-row c2" style="margin-bottom:10px;">
+      <input placeholder="رقم الإرسالية" id="ex-sendref" class="inp">
+      <select class="sel" id="ex-custody-month">${monthOpts}</select>
+    </div>
+    <div class="form-row c2" style="margin-bottom:10px;">
+      <select class="sel" id="ex-custody-type">
+        <option value="كاش">كاش</option>
+        <option value="بطاقة بنكية">بطاقة بنكية</option>
+        <option value="تحويل بنكي">تحويل بنكي</option>
+      </select>
+      <select class="sel" id="ex-deduct-status">
+        <option value="جاري التخفيض">جاري التخفيض</option>
+        <option value="تم التخفيض">تم التخفيض</option>
+      </select>
+    </div>
+    <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">موقف الكشف</div>
+    <select class="sel" id="ex-location" style="margin-bottom:16px;">
+      <option value="موجود لدى إدارة المشاريع">موجود لدى إدارة المشاريع</option>
+      <option value="لدى الإدارة المالية">لدى الإدارة المالية</option>
+    </select>
+    <button class="btn btn-gold btn-full" onclick="saveExtract()">✓ حفظ الكشف</button>`;}
 
   if(type==='addAsset') return `
     <div class="sheet-title"><h3>🏷️ إضافة أصل جديد</h3>${close}</div>
@@ -4980,9 +5171,19 @@ function saveCustody(){
 function saveClaim(){
   const amount=+document.getElementById('cl-amount')?.value;
   const supplier=document.getElementById('cl-supplier')?.value;
+  const invoiceNo=document.getElementById('cl-invno')?.value||'';
   if(!amount||!supplier) return showToast('أدخل المبلغ والمورد','#f43f5e');
-  DB.claims.push({id:uid(),projectId:document.getElementById('cl-proj').value,budgetLineId:document.getElementById('cl-line').value,supplier,invoiceNo:document.getElementById('cl-invno').value,invoiceUrl:document.getElementById('cl-url')?.value||'',amount,date:document.getElementById('cl-date').value,status:'pending'});
-  saveDB();closeModal();showToast('تم تسجيل المطالبة ✓','#38bdf8');render();
+
+  // تنبيه التكرار
+  if(invoiceNo){
+    const dup=DB.claims.find(c=>c.supplier===supplier&&c.invoiceNo===invoiceNo);
+    if(dup){ if(!confirm('⚠️ مطالبة بنفس المورد ورقم الفاتورة "'+invoiceNo+'" موجودة بالفعل!\nهل تريد الإضافة على أي حال؟')) return; }
+  }
+
+  const notes=document.getElementById('cl-notes')?.value?.trim()||'';
+
+  DB.claims.push({id:uid(),projectId:document.getElementById('cl-proj').value,budgetLineId:document.getElementById('cl-line').value,supplier,invoiceNo,invoiceUrl:document.getElementById('cl-url')?.value||'',amount,date:document.getElementById('cl-date').value,status:'pending',notes});
+  saveDB();closeModal();showToast('✅ تم تسجيل المطالبة','#38bdf8');render();
 }
 function reopenCustody(id){
   if(!confirm('إعادة فتح العهدة؟')) return;
@@ -5281,24 +5482,90 @@ function saveVehicleExpense(){
 /* ═══════════════════════════════════
    EXTRACTS FUNCTIONS
 ═══════════════════════════════════ */
+function updateExtractLines(projId){
+  const lineEl=document.getElementById('ex-line');
+  if(!lineEl) return;
+  const lines=(DB.lines||[]).filter(l=>l.projectId===projId);
+  lineEl.innerHTML=lines.length?lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join(''):'<option value="">لا توجد بنود</option>';
+}
+
+function printExtract(id){
+  const e=DB.extracts.find(x=>x.id===id); if(!e) return;
+  const proj=DB.projects.find(p=>p.id===e.projectId)||{name:'—'};
+  const line=DB.lines.find(l=>l.id===e.lineId)||{category:'—'};
+  const companyName=DB.companyName||COMPANY;
+  const logo=DB.logo?'<img src="'+DB.logo+'" style="width:55px;height:55px;object-fit:contain;border-radius:8px;">'
+    :'<div style="width:55px;height:55px;background:#f5f0e8;border:2px solid #b8892a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:26px;">🏢</div>';
+
+  const html='<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8">'+
+  '<style>@import url(\'https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap\');*{margin:0;padding:0;box-sizing:border-box;}body{font-family:\'Cairo\',sans-serif;padding:16mm 18mm;}'+
+  '.header{border:2px solid #1a5276;border-radius:10px;padding:14px 18px;margin-bottom:20px;}.header-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #ddd;}'+
+  '.logo-area{display:flex;align-items:center;gap:12px;}.company-name{font-size:17px;font-weight:900;color:#1a5276;}'+
+  '.report-title h2{font-size:18px;font-weight:900;color:#b8892a;}.report-title p{font-size:11px;color:#666;margin-top:3px;}'+
+  '.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;}'+
+  '.field{background:#f8f9fa;border-radius:8px;padding:10px 14px;}.field-label{font-size:9px;color:#888;margin-bottom:3px;}.field-value{font-size:13px;font-weight:800;color:#1a5276;}'+
+  '.amount-box{background:linear-gradient(135deg,#1a5276,#0f3460);color:#f0c866;border-radius:10px;padding:16px;text-align:center;margin-bottom:20px;}'+
+  '.amount-label{font-size:11px;color:#a0c0e0;margin-bottom:4px;}.amount-val{font-size:32px;font-weight:900;}'+
+  '.status-row{display:flex;gap:12px;margin-bottom:24px;}'+
+  '.status-box{flex:1;padding:10px;border-radius:8px;text-align:center;}'+
+  '.signatures{display:grid;grid-template-columns:1fr 1fr;gap:60px;margin-top:40px;}'+
+  '.sig-box{text-align:center;}.sig-space{height:55px;}.sig-line{border-top:1.5px solid #333;padding-top:6px;}.sig-title{font-size:12px;font-weight:800;color:#1a5276;}'+
+  '</style></head><body>'+
+  '<div class="header"><div class="header-top">'+
+  '<div class="logo-area">'+logo+'<div><div class="company-name">'+companyName+'</div></div></div>'+
+  '<div class="report-title"><h2>كشف التخفيض</h2><p>رقم الكشف: '+e.refNum+'</p></div>'+
+  '</div></div>'+
+  '<div class="grid">'+
+  '<div class="field"><div class="field-label">المشروع</div><div class="field-value">'+proj.name+'</div></div>'+
+  '<div class="field"><div class="field-label">البند</div><div class="field-value">'+line.category+'</div></div>'+
+  '<div class="field"><div class="field-label">تاريخ الكشف</div><div class="field-value">'+(e.date||'—')+'</div></div>'+
+  '<div class="field"><div class="field-label">تاريخ الإرسال</div><div class="field-value">'+(e.sendDate||'—')+'</div></div>'+
+  '<div class="field"><div class="field-label">رقم الإرسالية</div><div class="field-value">'+(e.sendRef||'—')+'</div></div>'+
+  '<div class="field"><div class="field-label">عهدة الشهر</div><div class="field-value">'+(e.custodyMonth||'—')+' — '+(e.custodyType||'—')+'</div></div>'+
+  '</div>'+
+  '<div class="amount-box"><div class="amount-label">قيمة الكشف</div><div class="amount-val">'+fmt(e.amount||0)+' ر.س</div></div>'+
+  '<div class="status-row">'+
+  '<div class="status-box" style="background:'+(e.deductStatus==='تم التخفيض'?'rgba(16,185,129,0.1)':'rgba(245,158,11,0.1)')+';border:1px solid '+(e.deductStatus==='تم التخفيض'?'rgba(16,185,129,0.3)':'rgba(245,158,11,0.3)')+';">'+
+    '<div style="font-size:10px;color:#666;margin-bottom:3px;">حالة التخفيض</div>'+
+    '<div style="font-weight:800;color:'+(e.deductStatus==='تم التخفيض'?'#059669':'#d97706')+';">'+(e.deductStatus||'جاري التخفيض')+'</div>'+
+  '</div>'+
+  '<div class="status-box" style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);">'+
+    '<div style="font-size:10px;color:#666;margin-bottom:3px;">موقف الكشف</div>'+
+    '<div style="font-weight:800;color:#6366f1;">'+(e.location||'—')+'</div>'+
+  '</div>'+
+  '</div>'+
+  '<div class="signatures">'+
+  '<div class="sig-box"><div class="sig-space"></div><div class="sig-line"><div class="sig-title">محاسب المشاريع</div></div></div>'+
+  '<div class="sig-box"><div class="sig-space"></div><div class="sig-line"><div class="sig-title">مدير المنطقة الغربية لقطاع الخدمات البيئية</div></div></div>'+
+  '</div>'+
+  '<script>window.onload=()=>window.print();<\\/script>'+
+  '</body></html>';
+
+  const win=window.open('','_blank');
+  win.document.write(html);
+  win.document.close();
+}
+
 function saveExtract(){
   const amount=+document.getElementById('ex-amount')?.value;
-  const num   =+document.getElementById('ex-num')?.value||1;
-  if(!amount||amount<=0) return showToast('أدخل مبلغ المستخلص','#f43f5e');
+  const refNum=document.getElementById('ex-refnum')?.value?.trim()||'';
+  if(!amount||amount<=0) return showToast('أدخل قيمة الكشف','#f43f5e');
+  if(!refNum) return showToast('أدخل رقم الكشف','#f43f5e');
   if(!DB.extracts) DB.extracts=[];
-  const status=document.getElementById('ex-status')?.value||'pending';
   DB.extracts.push({
     id:uid(),
-    projectId:  document.getElementById('ex-proj')?.value||'',
-    number:     num,
-    month:      +document.getElementById('ex-month')?.value||1,
-    year:       +document.getElementById('ex-year')?.value||new Date().getFullYear(),
+    refNum,
+    projectId:document.getElementById('ex-proj')?.value||'',
+    lineId:document.getElementById('ex-line')?.value||'',
     amount,
-    approvalDate:document.getElementById('ex-approval')?.value||'',
-    payDate:    status==='paid'?(document.getElementById('ex-paydate')?.value||today()):'',
-    status,
-    pdfUrl:     document.getElementById('ex-pdf')?.value||'',
-    notes:      document.getElementById('ex-notes')?.value||'',
+    date:document.getElementById('ex-date')?.value||today(),
+    sendDate:document.getElementById('ex-senddate')?.value||'',
+    sendRef:document.getElementById('ex-sendref')?.value?.trim()||'',
+    custodyMonth:document.getElementById('ex-custody-month')?.value||'',
+    custodyType:document.getElementById('ex-custody-type')?.value||'',
+    deductStatus:document.getElementById('ex-deduct-status')?.value||'جاري التخفيض',
+    location:document.getElementById('ex-location')?.value||'',
+    status:'pending',
   });
   saveDB(); closeModal();
   showToast('تم حفظ المستخلص ✓','var(--gold)');
@@ -5310,11 +5577,7 @@ function payExtract(id){
   saveDB(); showToast('تم تسجيل الدفع ✓','#10b981'); render();
 }
 
-function deleteExtract(id){
-  if(!confirm('حذف هذا المستخلص؟')) return;
-  DB.extracts=(DB.extracts||[]).filter(e=>e.id!==id);
-  saveDB(); showToast('تم الحذف','#f43f5e'); render();
-}
+
 
 /* ═══════════════════════════════════
    ASSETS FUNCTIONS
@@ -6015,15 +6278,25 @@ function saveEmployee(){
   DB.employees.push({id:uid(),name,role,projectId,fileNum,nationalId,salary});
   saveDB();closeModal();showToast('✅ تم إضافة الموظف','#10b981');render();
 }
+
+function deleteClaim(id){
+  if(!confirm('حذف هذه المطالبة؟')) return;
+  DB.claims=DB.claims.filter(c=>c.id!==id);
+  saveDB();
+  switchTab('suppliers');
+  showToast('تم الحذف','#f43f5e');
+}
+
 function saveEditClaim(){
   const id=document.getElementById('ec-id')?.value;
   const date=document.getElementById('ec-date')?.value||today();
   const supplier=document.getElementById('ec-supplier')?.value?.trim()||'';
   const invoiceNo=document.getElementById('ec-invno')?.value?.trim()||'';
   const amount=parseFloat(document.getElementById('ec-amount')?.value)||0;
+  const notes=document.getElementById('ec-notes')?.value?.trim()||'';
   if(!supplier) return showToast('أدخل اسم المورد','#f43f5e');
   const c=DB.claims.find(x=>x.id===id);
-  if(c){ c.date=date; c.supplier=supplier; c.invoiceNo=invoiceNo; if(amount>0) c.amount=amount; }
+  if(c){ c.date=date; c.supplier=supplier; c.invoiceNo=invoiceNo; if(amount>0) c.amount=amount; c.notes=notes; }
   saveDB(); closeModal();
   switchTab('suppliers');
   showToast('✅ تم تعديل المطالبة','#10b981');
