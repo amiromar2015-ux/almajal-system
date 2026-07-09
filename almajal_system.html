@@ -430,23 +430,18 @@ async function fbLoad(){
   if(!DB.deductStatements) DB.deductStatements=[];
     if(!DB.fixedExpenses) DB.fixedExpenses=[];
     if(!DB.tasks) DB.tasks=[];
-    // تأكد من وجود حقول الكشوف الجديدة
-    DB.extracts=DB.extracts.map(e=>({
-      refNum:e.refNum||e.number||'',
-      lineId:e.lineId||'',
-      sendDate:e.sendDate||'',
-      sendRef:e.sendRef||'',
-      custodyMonth:e.custodyMonth||'',
-      custodyType:e.custodyType||'',
-      deductStatus:e.deductStatus||'جاري التخفيض',
-      location:e.location||'',
-      ...e
-    }));
     // تأكد من وجود حقول المطالبات الجديدة
     DB.claims=DB.claims.map(c=>({notes:c.notes||'',...c}));
-    // تنظيف تلقائي - فصل المستخلصات عن كشوف التخفيض
-    DB.extracts=(DB.extracts||[]).filter(e=>!e.deductStatus&&!e.refNum);
-    DB.deductStatements=(DB.deductStatements||[]).filter(e=>e.refNum||e.deductStatus);
+    // فصل المستخلصات عن كشوف التخفيض نهائياً
+    // كشوف التخفيض: فيها refNum أو deductStatus من الأصل
+    // المستخلصات: فيها number أو month (البنية القديمة)
+    const realDeducts=(DB.extracts||[]).filter(e=>e.refNum||(e.deductStatus&&e.deductStatus!==''));
+    const realExtracts=(DB.extracts||[]).filter(e=>!e.refNum&&(!e.deductStatus||e.deductStatus===''));
+    DB.extracts=realExtracts;
+    // أضف كشوف التخفيض المكتشفة لـ deductStatements لو مش موجودة
+    realDeducts.forEach(e=>{
+      if(!DB.deductStatements.find(d=>d.id===e.id)) DB.deductStatements.push(e);
+    });
     render();
     showToast('✅ تم تحميل البيانات من السحابة','#10b981');
   }catch(e){ console.log('Firebase load error:',e); }
