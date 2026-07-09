@@ -444,6 +444,9 @@ async function fbLoad(){
     }));
     // تأكد من وجود حقول المطالبات الجديدة
     DB.claims=DB.claims.map(c=>({notes:c.notes||'',...c}));
+    // تنظيف تلقائي - فصل المستخلصات عن كشوف التخفيض
+    DB.extracts=(DB.extracts||[]).filter(e=>!e.deductStatus&&!e.refNum);
+    DB.deductStatements=(DB.deductStatements||[]).filter(e=>e.refNum||e.deductStatus);
     render();
     showToast('✅ تم تحميل البيانات من السحابة','#10b981');
   }catch(e){ console.log('Firebase load error:',e); }
@@ -3860,6 +3863,10 @@ async function forceReloadFromCloud(){
     DB.claims=DB.claims.map(c=>({notes:c.notes||'',...c}));
     // Save updated to localStorage
     saveDB();
+    // تنظيف DB.extracts - لو فيها بيانات كشوف تخفيض (deductStatus) امسحها
+    DB.extracts=(DB.extracts||[]).filter(e=>!e.deductStatus&&!e.refNum);
+    // تنظيف DB.deductStatements - لو فيها بيانات مستخلصات قديمة (number/month) امسحها
+    DB.deductStatements=(DB.deductStatements||[]).filter(e=>e.refNum||e.deductStatus);
     render();
     showToast('✅ تم التحديث من السحابة بنجاح','#10b981');
   }catch(e){
