@@ -361,6 +361,7 @@ let DB = {
   companyName:'شركة مجموعة المجال العربي', // اسم الشركة
   fixedExpenses:[], // مصاريف ثابتة شهرية: {id, name, amount, dueDay, category, payments[]}
   tasks:[], // مهام وتذكيرات: {id, title, assignedTo, dueDate, status, notes}
+  deductStatements:[], // كشوف التخفيض
   purchaseRequests:[], // طلبات الشراء: {id, dept, itemName, quantity, date, status, notes}
   contracts:[],       // عقود الإيجار: {id, contractNo, tenant, asset, startDate, endDate, value, paymentType, payments[], status, notes}
   invoices:[],        // فواتير: {id, supplier, lineId, projectId, invoiceNo, date, amount, tax, total, note}
@@ -380,6 +381,7 @@ function loadDB(){
   if(!DB.invoices) DB.invoices=[];
   if(!DB.contracts) DB.contracts=[];
   if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
   if(!DB.fixedExpenses) DB.fixedExpenses=[];
   if(!DB.tasks) DB.tasks=[];
   if(!DB.items) DB.items=[];
@@ -410,6 +412,7 @@ async function fbLoad(){
     const d = JSON.parse(payload);
     if(!d.projects) return;
     DB = d;
+    // تأكد من وجود كل الحقول الجديدة
     if(!DB.monthlyBudgets) DB.monthlyBudgets=[];
     if(!DB.companyName) DB.companyName=COMPANY;
     if(!DB.items) DB.items=[];
@@ -421,6 +424,24 @@ async function fbLoad(){
     if(!DB.vehicleExpenses) DB.vehicleExpenses=[];
     if(!DB.claims) DB.claims=[];
     if(!DB.custodies) DB.custodies=[];
+    if(!DB.invoices) DB.invoices=[];
+    if(!DB.contracts) DB.contracts=[];
+    if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
+    if(!DB.fixedExpenses) DB.fixedExpenses=[];
+    if(!DB.tasks) DB.tasks=[];
+    // تأكد من وجود حقول المطالبات الجديدة
+    DB.claims=DB.claims.map(c=>({notes:c.notes||'',...c}));
+    // فصل المستخلصات عن كشوف التخفيض نهائياً
+    // كشوف التخفيض: فيها refNum أو deductStatus من الأصل
+    // المستخلصات: فيها number أو month (البنية القديمة)
+    const realDeducts=(DB.extracts||[]).filter(e=>e.refNum||(e.deductStatus&&e.deductStatus!==''));
+    const realExtracts=(DB.extracts||[]).filter(e=>!e.refNum&&(!e.deductStatus||e.deductStatus===''));
+    DB.extracts=realExtracts;
+    // أضف كشوف التخفيض المكتشفة لـ deductStatements لو مش موجودة
+    realDeducts.forEach(e=>{
+      if(!DB.deductStatements.find(d=>d.id===e.id)) DB.deductStatements.push(e);
+    });
     render();
     showToast('✅ تم تحميل البيانات من السحابة','#10b981');
   }catch(e){ console.log('Firebase load error:',e); }
@@ -576,7 +597,7 @@ function renderTabs(){
     {k:'suppliers',lb:'🏪 الموردين'},
     {k:'extracts',lb:'📑 المستخلصات'},
     {k:'alerts',lb:'🔔 التنبيهات'+(alerts.length>0?' ('+alerts.length+')':'')},
-    {k:'statements',lb:'📝 الكشوف'},
+    {k:'statements',lb:'📝 كشوف التخفيض'},
     {k:'vehicles',lb:'🚗 السيارات والمعدات'},
     {k:'assets',lb:'🏷️ الأصول'},
     {k:'warehouse',lb:'📦 المخزن'},
@@ -621,8 +642,8 @@ function renderMain(){
     case 'suppliers':el.innerHTML=suppHTML(); setTimeout(renderClaimsTable,80); break;
     case 'alerts':   el.innerHTML=alertsHTML(); break;
     case 'reports':  el.innerHTML=reportsHTML(); break;
-    case 'statements': el.innerHTML=statementsHTML(); break;
-    case 'extracts':   el.innerHTML=extractsHTML(); setTimeout(renderExtractsTable,80); break;
+    case 'statements': el.innerHTML=statementsHTML(); setTimeout(renderStatementsTable,80); break;
+    case 'extracts':   el.innerHTML=extractsHTML(); break;
     case 'vehicles':   el.innerHTML=vehiclesHTML(); break;
     case 'assets':     el.innerHTML=assetsHTML(); break;
     case 'fixedExp':   el.innerHTML=fixedExpHTML(); break;
@@ -2138,76 +2159,40 @@ function reportsHTML(){
 /* ── EXTRACTS ── */
 function extractsHTML(){
   const exts=DB.extracts||[];
-  const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
-  const projOpts2=(DB.projects||[]).map(p=>'<option value="'+p.id+'">'+p.name+'</option>').join('');
-
-  const total=exts.reduce((s,e)=>s+(e.amount||0),0);
-  const deducted=exts.filter(e=>e.deductStatus==='تم التخفيض').reduce((s,e)=>s+(e.amount||0),0);
-  const pending=exts.filter(e=>e.deductStatus!=='تم التخفيض').reduce((s,e)=>s+(e.amount||0),0);
-
+  const pending=exts.filter(e=>e.status==='pending');
+  const pendVal=pending.reduce((s,e)=>s+e.amount,0);
   return `
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-    <div style="font-weight:800;font-size:16px;">📑 الكشوف</div>
-    <div style="display:flex;gap:8px;">
-      <button onclick="exportExtractsExcel()" class="btn btn-ghost btn-pill btn-sm">⬇ Excel</button>
-      <button onclick="openModal('addExtract')" class="btn btn-gold btn-pill btn-sm">+ كشف جديد</button>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <div style="display:flex;gap:12px;align-items:center;">
+      <span style="font-weight:700;font-size:14px;">📑 المستخلصات</span>
+      ${pending.length>0?'<span class="badge badge-yellow">'+pending.length+' معلق — '+fmt(pendVal)+' '+SAR+'</span>':''}
     </div>
+    <button class="btn btn-yellow btn-pill btn-sm" onclick="openModal('addExtract')">+ مستخلص جديد</button>
   </div>
-
-  <!-- Summary -->
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;">
-    <div class="glass" style="padding:14px;text-align:center;">
-      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">إجمالي الكشوف</div>
-      <div style="font-weight:800;font-size:16px;color:var(--gold2);">${fmt(total)} ${SAR}</div>
-    </div>
-    <div class="glass" style="padding:14px;text-align:center;">
-      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">تم التخفيض</div>
-      <div style="font-weight:800;font-size:16px;color:#10b981;">${fmt(deducted)} ${SAR}</div>
-    </div>
-    <div class="glass" style="padding:14px;text-align:center;">
-      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">جاري التخفيض</div>
-      <div style="font-weight:800;font-size:16px;color:#f59e0b;">${fmt(pending)} ${SAR}</div>
-    </div>
-  </div>
-
-  <!-- Filters -->
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
-    <select class="sel" id="ext-filter-proj" style="font-size:12px;" onchange="renderExtractsTable()">
-      <option value="">كل المشاريع</option>
-      ${projOpts2}
-    </select>
-    <select class="sel" id="ext-filter-deduct" style="font-size:12px;" onchange="renderExtractsTable()">
-      <option value="">كل حالات التخفيض</option>
-      <option value="تم التخفيض">تم التخفيض</option>
-      <option value="جاري التخفيض">جاري التخفيض</option>
-    </select>
-    <select class="sel" id="ext-filter-loc" style="font-size:12px;" onchange="renderExtractsTable()">
-      <option value="">كل مواقف الكشف</option>
-      <option value="موجود لدى إدارة المشاريع">إدارة المشاريع</option>
-      <option value="لدى الإدارة المالية">الإدارة المالية</option>
-    </select>
-  </div>
-
-  <!-- Table -->
-  <div class="glass" style="overflow-x:auto;">
-    ${exts.length===0?'<div style="padding:40px;text-align:center;color:var(--text4);">لا توجد كشوف — أضف كشف جديد</div>':`
-    <table class="tbl" style="min-width:900px;">
-      <thead><tr>
-        <th>رقم الكشف</th><th>المشروع</th><th>البند</th>
-        <th>قيمة الكشف</th><th>تاريخ الكشف</th><th>تاريخ الإرسال</th>
-        <th>رقم الإرسالية</th><th>عهدة الشهر</th><th>نوع العهدة</th>
-        <th>حالة التخفيض</th><th>موقف الكشف</th><th></th>
-      </tr></thead>
-      <tbody id="ext-tbody"></tbody>
-    </table>`}
-  </div>`;
+  ${exts.length===0?'<div style="background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.07);border-radius:14px;padding:48px;text-align:center;color:var(--text4);font-size:13px;">لا توجد مستخلصات</div>':`
+  <div class="glass" style="overflow:hidden;">
+    <table class="tbl">
+      <thead><tr><th>المشروع</th><th>رقم المستخلص</th><th>الشهر</th><th>المبلغ</th><th>تاريخ الاعتماد</th><th>الحالة</th></tr></thead>
+      <tbody>${[...exts].reverse().map(e=>`
+        <tr>
+          <td>${projById(e.projectId).name}</td>
+          <td style="text-align:center;font-weight:600;">${e.number||e.refNum||'—'}</td>
+          <td style="color:var(--text3);">${MONTHS_AR[(e.month||1)-1]||'—'} ${e.year||''}</td>
+          <td style="font-weight:700;color:var(--gold2);">${fmt(e.amount)} ${SAR}</td>
+          <td style="color:var(--text3);">${e.approvalDate||'—'}</td>
+          <td><span class="badge badge-${e.status==='paid'?'green':'yellow'}">${e.status==='paid'?'مدفوع':'معلق'}</span></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`}`;
 }
+
 
 function renderExtractsTable(){
   const projF=document.getElementById('ext-filter-proj')?.value||'';
   const deductF=document.getElementById('ext-filter-deduct')?.value||'';
   const locF=document.getElementById('ext-filter-loc')?.value||'';
-  let exts=[...(DB.extracts||[])].reverse();
+  let exts=[...(DB.deductStatements||[])].reverse();
   if(projF) exts=exts.filter(e=>e.projectId===projF);
   if(deductF) exts=exts.filter(e=>e.deductStatus===deductF);
   if(locF) exts=exts.filter(e=>e.location===locF);
@@ -2271,79 +2256,107 @@ function deleteExtract(id){
 
 
 function statementsHTML(){
-  const stmts = DB.statements||[];
+  const exts=DB.deductStatements||[];
+  const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  const projOpts2=(DB.projects||[]).map(p=>'<option value="'+p.id+'">'+p.name+'</option>').join('');
+
+  const total=exts.reduce((s,e)=>s+(e.amount||0),0);
+  const deducted=exts.filter(e=>e.deductStatus==='تم التخفيض').reduce((s,e)=>s+(e.amount||0),0);
+  const pending=exts.filter(e=>e.deductStatus!=='تم التخفيض').reduce((s,e)=>s+(e.amount||0),0);
+
   return `
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-    <span style="font-weight:800;font-size:16px;">📝 كشوف الحساب</span>
-    <button onclick="openModal('newStatement')" class="btn btn-green btn-pill btn-sm">+ كشف جديد</button>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+    <div style="font-weight:800;font-size:16px;">📝 كشوف التخفيض</div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="exportDeductExcel()" class="btn btn-ghost btn-pill btn-sm">⬇ Excel</button>
+      <button onclick="openModal('addDeductStatement')" class="btn btn-gold btn-pill btn-sm">+ كشف جديد</button>
+    </div>
   </div>
 
-  ${stmts.length===0?`
-  <div style="background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.07);border-radius:14px;padding:48px;text-align:center;color:var(--text4);font-size:13px;">
-    لا توجد كشوف — اضغط "+ كشف جديد" للبدء
-  </div>`:'' + stmts.map(s=>{
-    const emp=empById(s.employeeId);
-    const proj=projById(s.projectId);
-    const total=s.items.reduce((a,i)=>a+i.amount,0);
-    const cust=s.custodyId?(DB.custodies||[]).find(c=>c.id===s.custodyId):null;
-    const diff=cust?cust.amount-total-s.returnedCash:0;
-    return `
-    <div class="card" style="margin-bottom:14px;border-color:rgba(16,185,129,0.2);">
-      <!-- Header -->
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.06);">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div style="width:40px;height:40px;border-radius:10px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);display:flex;align-items:center;justify-content:center;font-size:18px;">📝</div>
-          <div>
-            <div style="font-weight:800;font-size:14px;">${emp.name}</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px;">
-              ${proj.name} · ${s.date}
-              ${s.fileNum?' · <span style="color:var(--gold2);">ملف: ' + s.fileNum + '</span>':''}
-            </div>
-          </div>
-        </div>
-        <div style="text-align:left;">
-          <div style="font-weight:900;font-size:20px;color:#10b981;">${fmt(total)} <span style="font-size:11px;font-weight:400;">${SAR}</span></div>
-          <div style="font-size:10px;color:var(--text4);margin-top:2px;">${s.items.length} بند</div>
-        </div>
-      </div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;">
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">إجمالي الكشوف</div>
+      <div style="font-weight:800;font-size:16px;color:var(--gold2);">${fmt(total)} ${SAR}</div>
+    </div>
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">تم التخفيض</div>
+      <div style="font-weight:800;font-size:16px;color:#10b981;">${fmt(deducted)} ${SAR}</div>
+    </div>
+    <div class="glass" style="padding:14px;text-align:center;">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">جاري التخفيض</div>
+      <div style="font-weight:800;font-size:16px;color:#f59e0b;">${fmt(pending)} ${SAR}</div>
+    </div>
+  </div>
 
-      <!-- Items preview -->
-      <div style="margin-bottom:12px;">
-        ${s.items.slice(0,3).map(it=>`
-        <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px;">
-          <div>
-            <span style="color:#e2e8f0;">${it.desc}</span>
-            ${it.invNo?'<span style="color:var(--text4);margin-right:8px;">فاتورة: '+it.invNo+'</span>':''}
-          </div>
-          <span style="font-weight:700;color:#a5b4fc;">${fmt(it.amount)} ${SAR}</span>
-        </div>`).join('')}
-        ${s.items.length>3?'<div style="font-size:11px;color:var(--text4);padding-top:6px;">+ ${s.items.length-3} بنود أخرى...</div>':''}
-      </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
+    <select class="sel" id="st-filter-proj" style="font-size:12px;" onchange="renderStatementsTable()">
+      <option value="">كل المشاريع</option>
+      ${projOpts2}
+    </select>
+    <select class="sel" id="st-filter-deduct" style="font-size:12px;" onchange="renderStatementsTable()">
+      <option value="">كل حالات التخفيض</option>
+      <option value="تم التخفيض">تم التخفيض</option>
+      <option value="جاري التخفيض">جاري التخفيض</option>
+    </select>
+    <select class="sel" id="st-filter-loc" style="font-size:12px;" onchange="renderStatementsTable()">
+      <option value="">كل المواقف</option>
+      <option value="موجود لدى إدارة المشاريع">إدارة المشاريع</option>
+      <option value="لدى الإدارة المالية">الإدارة المالية</option>
+    </select>
+  </div>
 
-      <!-- Custody reconciliation -->
-      ${cust?`
-      <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;font-size:11px;">
-        <span style="color:var(--text3);">العهدة: <strong style="color:#f59e0b;">${fmt(cust.amount)} ${SAR}</strong></span>
-        <span style="color:var(--text3);">الكشف: <strong style="color:#10b981;">${fmt(total)} ${SAR}</strong></span>
-        <span style="color:var(--text3);">مرتجع: <strong style="color:#34d399;">${fmt(s.returnedCash||0)} ${SAR}</strong></span>
-        <span style="color:${Math.abs(diff)<0.5?'#34d399':diff>0?'#f87171':'#38bdf8'};font-weight:700;">
-          ${Math.abs(diff)<0.5?'✅ مسوى':diff>0?('ذمة: '+fmt(diff)+' '+SAR):('مستحق: '+fmt(Math.abs(diff))+' '+SAR)}
-        </span>
-      </div>`:''}
-
-      <!-- Actions -->
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button onclick="printStatement('${s.id}')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);border-radius:50px;padding:7px 16px;color:var(--gold2);font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;">🖨 طباعة الكشف</button>
-        ${cust&&cust.status!=='settled'?'<button onclick="settleFromStatement(\''+s.id+'\')" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:50px;padding:7px 16px;color:#34d399;font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;">✓ تسوية العهدة</button>':''}
-      </div>
-    </div>`;
-  }).join('')}`;
+  <div class="glass" style="overflow-x:auto;">
+    ${exts.length===0?'<div style="padding:40px;text-align:center;color:var(--text4);">لا توجد كشوف — أضف كشف جديد</div>':`
+    <table class="tbl" style="min-width:900px;">
+      <thead><tr>
+        <th>رقم الكشف</th><th>المشروع</th><th>البند</th>
+        <th>قيمة الكشف</th><th>تاريخ الكشف</th><th>تاريخ الإرسال</th>
+        <th>رقم الإرسالية</th><th>عهدة الشهر</th><th>نوع العهدة</th>
+        <th>حالة التخفيض</th><th>موقف الكشف</th><th></th>
+      </tr></thead>
+      <tbody id="st-tbody"></tbody>
+    </table>`}
+  </div>`;
 }
 
-/* ── VEHICLES ── */
-const VEH_TYPES = ['سيارة نقل','سيارة خفيفة','جرار نظافة','معدة ثقيلة','دراجة نارية','أخرى'];
-const VEH_STATUS = ['شغال','في الصيانة','متوقف'];
-const VEH_STATUS_COL = {'شغال':'#10b981','في الصيانة':'#f59e0b','متوقف':'#f43f5e'};
+function renderStatementsTable(){
+  const projF=document.getElementById('st-filter-proj')?.value||'';
+  const deductF=document.getElementById('st-filter-deduct')?.value||'';
+  const locF=document.getElementById('st-filter-loc')?.value||'';
+  let exts=[...(DB.deductStatements||[])].reverse();
+  if(projF) exts=exts.filter(e=>e.projectId===projF);
+  if(deductF) exts=exts.filter(e=>e.deductStatus===deductF);
+  if(locF) exts=exts.filter(e=>e.location===locF);
+
+  const tbody=document.getElementById('st-tbody');
+  if(!tbody) return;
+  if(!exts.length){
+    tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:20px;color:var(--text4);">لا توجد نتائج</td></tr>';
+    return;
+  }
+  tbody.innerHTML=exts.map(e=>{
+    const proj=DB.projects.find(p=>p.id===e.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===e.lineId)||{category:'—'};
+    const deductColor=e.deductStatus==='تم التخفيض'?'#10b981':'#f59e0b';
+    const locColor=e.location==='لدى الإدارة المالية'?'#6366f1':'#38bdf8';
+    return '<tr>'+
+      '<td style="font-weight:700;">'+(e.refNum||'—')+'</td>'+
+      '<td style="color:var(--text3);font-size:11px;">'+proj.name+'</td>'+
+      '<td style="color:var(--text3);font-size:11px;">'+line.category+'</td>'+
+      '<td style="font-weight:800;color:var(--gold2);">'+fmt(e.amount||0)+' '+SAR+'</td>'+
+      '<td style="color:var(--text3);">'+(e.date||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.sendDate||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.sendRef||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.custodyMonth||'—')+'</td>'+
+      '<td style="color:var(--text3);">'+(e.custodyType||'—')+'</td>'+
+      '<td><span style="background:'+deductColor+'18;color:'+deductColor+';border-radius:50px;padding:3px 8px;font-size:11px;font-weight:700;">'+(e.deductStatus||'جاري التخفيض')+'</span></td>'+
+      '<td><span style="background:'+locColor+'18;color:'+locColor+';border-radius:50px;padding:3px 8px;font-size:11px;">'+(e.location||'—')+'</span></td>'+
+      `<td><button onclick="printExtract('${e.id}')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);border-radius:6px;padding:4px 8px;color:var(--gold2);font-size:11px;cursor:pointer;">🖨</button> `+
+      `<button onclick="deleteDeductStatement('${e.id}')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:13px;">🗑</button></td>`+
+    '</tr>';
+  }).join('');
+}
+
 
 function vehiclesHTML(){
   const vehicles = DB.vehicles||[];
@@ -2737,6 +2750,7 @@ function saveInvoiceRow(){
   if(!DB.invoices) DB.invoices=[];
   if(!DB.contracts) DB.contracts=[];
   if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
   if(!DB.fixedExpenses) DB.fixedExpenses=[];
   if(!DB.tasks) DB.tasks=[];
   // Check duplicate invoice number
@@ -2805,6 +2819,7 @@ function saveContract(){
   if(!tenant) return showToast('أدخل اسم المستأجر','#f43f5e');
   if(!DB.contracts) DB.contracts=[];
   if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
   if(!DB.fixedExpenses) DB.fixedExpenses=[];
   if(!DB.tasks) DB.tasks=[];
   if(id){
@@ -3131,6 +3146,7 @@ function saveePurchaseReq(){
   if(!itemName) return showToast('أدخل اسم المنتج / الطلب','#f43f5e');
   if(!quantity) return showToast('أدخل الكمية','#f43f5e');
   if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
   if(!DB.fixedExpenses) DB.fixedExpenses=[];
   if(!DB.tasks) DB.tasks=[];
   DB.purchaseRequests.push({id:uid(),dept,itemName,quantity,date,status:'pending',notes});
@@ -3807,9 +3823,100 @@ function printEmployeeStatement(empId){
   win.document.close();
 }
 
+function fixExtractsData(){
+  if(!confirm('هذا سيمسح بيانات المستخلصات المخلوطة ويصلح التبويب.\nالكشوف في تبويب كشوف التخفيض لن تتأثر.\nهل تريد المتابعة؟')) return;
+  
+  // Move any deduct statements from extracts to deductStatements
+  const mixedData=(DB.extracts||[]).filter(e=>e.deductStatus||e.refNum);
+  if(mixedData.length>0){
+    if(!DB.deductStatements) DB.deductStatements=[];
+    mixedData.forEach(e=>{
+      // Add to deductStatements if not already there
+      if(!DB.deductStatements.find(d=>d.id===e.id)){
+        DB.deductStatements.push(e);
+      }
+    });
+  }
+  
+  // Clean extracts - keep only real extracts (no deductStatus, no refNum)
+  DB.extracts=(DB.extracts||[]).filter(e=>!e.deductStatus&&!e.refNum);
+  
+  saveDB();
+  render();
+  showToast('✅ تم إصلاح تبويب المستخلصات','#10b981');
+}
+
+async function forceReloadFromCloud(){
+  showToast('جاري التحديث من السحابة...','#6366f1');
+  try{
+    // Clear localStorage first
+    localStorage.removeItem(STORAGE_KEY);
+    // Force fresh fetch from Firebase (bypass cache)
+    const r=await fetch(FB_URL+'&t='+Date.now());
+    if(!r.ok){ showToast('❌ تعذر الاتصال بالسحابة','#f43f5e'); return; }
+    const json=await r.json();
+    const payload=json.fields?.payload?.stringValue;
+    if(!payload){ showToast('❌ لا توجد بيانات في السحابة','#f43f5e'); return; }
+    const d=JSON.parse(payload);
+    if(!d.projects){ showToast('❌ بيانات غير صالحة','#f43f5e'); return; }
+    DB=d;
+    // Add any missing new fields
+    if(!DB.deductStatements) DB.deductStatements=[];
+    if(!DB.fixedExpenses) DB.fixedExpenses=[];
+    if(!DB.tasks) DB.tasks=[];
+    if(!DB.purchaseRequests) DB.purchaseRequests=[];
+    if(!DB.invoices) DB.invoices=[];
+    if(!DB.contracts) DB.contracts=[];
+    if(!DB.monthlyBudgets) DB.monthlyBudgets=[];
+    if(!DB.items) DB.items=[];
+    if(!DB.stockMovements) DB.stockMovements=[];
+    if(!DB.claims) DB.claims=[];
+    if(!DB.custodies) DB.custodies=[];
+    if(!DB.extracts) DB.extracts=[];
+    if(!DB.vehicles) DB.vehicles=[];
+    if(!DB.vehicleExpenses) DB.vehicleExpenses=[];
+    if(!DB.assets) DB.assets=[];
+    if(!DB.statements) DB.statements=[];
+    // Migrate claims notes
+    DB.claims=DB.claims.map(c=>({notes:c.notes||'',...c}));
+    // Save updated to localStorage
+    saveDB();
+    // تنظيف DB.extracts - لو فيها بيانات كشوف تخفيض (deductStatus) امسحها
+    DB.extracts=(DB.extracts||[]).filter(e=>!e.deductStatus&&!e.refNum);
+    // تنظيف DB.deductStatements - لو فيها بيانات مستخلصات قديمة (number/month) امسحها
+    DB.deductStatements=(DB.deductStatements||[]).filter(e=>e.refNum||e.deductStatus);
+    render();
+    showToast('✅ تم التحديث من السحابة بنجاح','#10b981');
+  }catch(e){
+    showToast('❌ خطأ: '+e.message,'#f43f5e');
+  }
+}
+
 function settingsHTML(){
   return `
   <div style="font-weight:800;font-size:16px;margin-bottom:20px;">⚙ الإعدادات</div>
+
+  <!-- Force Update Button -->
+  <div class="glass" style="padding:16px;margin-bottom:16px;border:1px solid rgba(99,102,241,0.3);">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-weight:700;font-size:13px;color:#6366f1;">🔄 تحديث النظام من السحابة</div>
+        <div style="font-size:11px;color:var(--text4);margin-top:3px;">لو شايف بيانات قديمة — اضغط هنا لتحميل أحدث نسخة</div>
+      </div>
+      <button onclick="forceReloadFromCloud()" style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:10px;padding:8px 16px;color:#6366f1;font-family:var(--font);font-weight:700;font-size:12px;cursor:pointer;">🔄 تحديث الآن</button>
+    </div>
+  </div>
+
+  <!-- Fix Extracts Button -->
+  <div class="glass" style="padding:16px;margin-bottom:16px;border:1px solid rgba(244,63,94,0.3);">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-weight:700;font-size:13px;color:#f43f5e;">🧹 إصلاح تبويب المستخلصات</div>
+        <div style="font-size:11px;color:var(--text4);margin-top:3px;">لو المستخلصات بتعرض بيانات كشوف — اضغط هنا لتصحيحها</div>
+      </div>
+      <button onclick="fixExtractsData()" style="background:rgba(244,63,94,0.1);border:1px solid rgba(244,63,94,0.3);border-radius:10px;padding:8px 16px;color:#f43f5e;font-family:var(--font);font-weight:700;font-size:12px;cursor:pointer;">🧹 إصلاح الآن</button>
+    </div>
+  </div>
   <div class="grid2" style="margin-bottom:20px;">
     <div class="card">
       <div style="font-size:20px;margin-bottom:10px;">💾</div>
@@ -3933,6 +4040,7 @@ function openModal(type,data){
     const c=DB.custodies.find(x=>x.id===data);
     if(c) tempInvoices=[...(c.invoices||[])];
   }
+  if(type==='addDeductStatement') setTimeout(()=>{const p=document.getElementById('ds-proj');if(p&&p.value)updateDSLines(p.value);},200);
   const overlay=document.createElement('div');
   overlay.className='overlay'; overlay.id='modal-overlay';
   overlay.onclick=e=>{ if(e.target===overlay) closeModal(); };
@@ -4254,7 +4362,9 @@ function getModalHTML(type,data){
     return `
     <div class="sheet-title"><h3>🖨 طباعة تقرير الفواتير</h3>${close}</div>
     <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">المشروع</div>
-    <select class="sel" id="pr-proj" style="margin-bottom:10px;">${projOpts2}</select>
+    <select class="sel" id="pr-proj" style="margin-bottom:10px;" onchange="updatePrintLines(this.value)">${projOpts2}</select>
+    <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">البند (اختياري — اتركه فاضي لطباعة كل البنود)</div>
+    <select class="sel" id="pr-line" style="margin-bottom:10px;"><option value="">كل البنود</option></select>
     <div class="form-row c2" style="margin-bottom:10px;">
       <div>
         <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">الشهر</div>
@@ -4284,9 +4394,14 @@ function getModalHTML(type,data){
       <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--text4);font-size:12px;">${SAR}</span>
     </div>
     <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">رقم الملف</div>
-    <input placeholder="مثال: QBA-2026-06" id="pr-file-no" class="inp" style="margin-bottom:16px;">
+    <input placeholder="مثال: QBA-2026-06" id="pr-file-no" class="inp" style="margin-bottom:10px;">
+    <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">تحديد نطاق الفواتير (اختياري)</div>
+    <div class="form-row c2" style="margin-bottom:16px;">
+      <input type="number" placeholder="من فاتورة رقم" id="pr-from" class="inp" min="1">
+      <input type="number" placeholder="إلى فاتورة رقم" id="pr-to" class="inp" min="1">
+    </div>
     <button class="btn btn-gold btn-full" onclick="printInvoicesReport()">🖨 طباعة التقرير</button>
-    <script>setTimeout(()=>{const s=document.getElementById('pr-emp');if(s&&s.value)autoFillEmpData(s.value);},100);<\/script>`;
+    <script>setTimeout(()=>{const s=document.getElementById('pr-emp');if(s&&s.value)autoFillEmpData(s.value);const p=document.getElementById('pr-proj');if(p&&p.value)updatePrintLines(p.value);},100);<\/script>`;
   }
 
   if(type==='addPurchaseReq'){
@@ -4463,6 +4578,42 @@ function getModalHTML(type,data){
     <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;">📁 التفصيل حسب المشروع</div>
     ${custs.length===0?'<div style="text-align:center;color:var(--text4);padding:30px;">لا توجد عهد لهذا الموظف</div>':projectBlocks}
     <button class="btn btn-gold btn-full" style="margin-top:10px;" onclick="printEmployeeStatement('${e.id}')">🖨 طباعة الكشف الكامل</button>`;
+  }
+
+  if(type==='addDeductStatement'){
+    const projOpts4=(DB.projects||[]).map(p=>'<option value="'+p.id+'">'+p.name+'</option>').join('');
+    const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    const monthOpts=months.map((m,i)=>'<option value="'+m+'" '+(new Date().getMonth()===i?'selected':'')+'>'+m+'</option>').join('');
+    const lineOpts2=(DB.lines||[]).filter(l=>l.projectId===(DB.projects[0]?.id||'')).map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join('');
+    return '<div class="sheet-title"><h3>📝 كشف تخفيض جديد</h3>'+close+'</div>'+
+    '<div class="form-row c2" style="margin-bottom:10px;">'+
+    '<input placeholder="رقم الكشف" id="ds-refnum" class="inp">'+
+    '<div style="position:relative;"><input type="number" placeholder="قيمة الكشف" id="ds-amount" class="inp" style="padding-left:40px;"><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text4);font-size:12px;">'+SAR+'</span></div>'+
+    '</div>'+
+    '<div class="form-row c2" style="margin-bottom:10px;">'+
+    '<div><div style="font-size:11px;color:var(--text4);margin-bottom:4px;">المشروع</div>'+
+    '<select class="sel" id="ds-proj" onchange="updateDSLines(this.value)">'+projOpts4+'</select></div>'+
+    '<div><div style="font-size:11px;color:var(--text4);margin-bottom:4px;">البند</div>'+
+    '<select class="sel" id="ds-line">'+lineOpts2+'</select></div>'+
+    '</div>'+
+    '<div class="form-row c2" style="margin-bottom:10px;">'+
+    '<div><div style="font-size:11px;color:var(--text4);margin-bottom:4px;">تاريخ الكشف</div><input type="date" id="ds-date" class="inp" value="'+today()+'"></div>'+
+    '<div><div style="font-size:11px;color:var(--text4);margin-bottom:4px;">تاريخ الإرسال</div><input type="date" id="ds-senddate" class="inp"></div>'+
+    '</div>'+
+    '<div class="form-row c2" style="margin-bottom:10px;">'+
+    '<input placeholder="رقم الإرسالية" id="ds-sendref" class="inp">'+
+    '<select class="sel" id="ds-custody-month">'+monthOpts+'</select>'+
+    '</div>'+
+    '<div class="form-row c2" style="margin-bottom:10px;">'+
+    '<select class="sel" id="ds-custody-type"><option value="كاش">كاش</option><option value="بطاقة بنكية">بطاقة بنكية</option><option value="تحويل بنكي">تحويل بنكي</option></select>'+
+    '<select class="sel" id="ds-deduct-status"><option value="جاري التخفيض">جاري التخفيض</option><option value="تم التخفيض">تم التخفيض</option></select>'+
+    '</div>'+
+    '<div style="font-size:11px;color:var(--text4);margin-bottom:5px;">موقف الكشف</div>'+
+    '<select class="sel" id="ds-location" style="margin-bottom:16px;">'+
+    '<option value="موجود لدى إدارة المشاريع">موجود لدى إدارة المشاريع</option>'+
+    '<option value="لدى الإدارة المالية">لدى الإدارة المالية</option>'+
+    '</select>'+
+    '<button class="btn btn-gold btn-full" onclick="saveDeductStatement()">✓ حفظ الكشف</button>';
   }
 
   if(type==='addLine') return `
@@ -4667,7 +4818,8 @@ function getModalHTML(type,data){
       <option value="موجود لدى إدارة المشاريع">موجود لدى إدارة المشاريع</option>
       <option value="لدى الإدارة المالية">لدى الإدارة المالية</option>
     </select>
-    <button class="btn btn-gold btn-full" onclick="saveExtract()">✓ حفظ الكشف</button>`;}
+    <button class="btn btn-gold btn-full" onclick="saveExtract()">✓ حفظ الكشف</button>
+    <script>setTimeout(()=>{const p=document.getElementById('ex-proj');if(p&&p.value)updateExtractLines(p.value);},150);<\/script>`;}
 
   if(type==='addAsset') return `
     <div class="sheet-title"><h3>🏷️ إضافة أصل جديد</h3>${close}</div>
@@ -5242,6 +5394,14 @@ function toggleCustomEmp(val){
   if(val==='__custom__') el.focus();
 }
 
+
+function updatePrintLines(projId){
+  const el=document.getElementById('pr-line');
+  if(!el) return;
+  const lines=(DB.lines||[]).filter(l=>l.projectId===projId);
+  el.innerHTML='<option value="">كل البنود</option>'+lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join('');
+}
+
 function printInvoicesReport(){
   const projId=document.getElementById('pr-proj')?.value;
   const month=+document.getElementById('pr-month')?.value;
@@ -5252,6 +5412,8 @@ function printInvoicesReport(){
   const fileNo=document.getElementById('pr-file-no')?.value?.trim()||'';
 
   const proj=DB.projects.find(p=>p.id===projId)||{name:'—'};
+  const lineId=document.getElementById('pr-line')?.value||'';
+  const lineObj=lineId?DB.lines.find(l=>l.id===lineId):null;
   const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
   const monthName=months[month-1];
   const mn=month<10?'0'+month:''+month;
@@ -5259,9 +5421,15 @@ function printInvoicesReport(){
   // Filter invoices
   let invs=(DB.invoices||[]).filter(i=>{
     if(i.projectId!==projId) return false;
+    if(lineId && i.lineId!==lineId) return false;
     const d=i.date||'';
     return d.includes(year+'-'+mn)||d.substring(3,7)===(mn+'/'+year);
   });
+
+  // Apply range filter
+  const fromIdx=(parseInt(document.getElementById('pr-from')?.value)||1)-1;
+  const toIdx=parseInt(document.getElementById('pr-to')?.value)||invs.length;
+  invs=invs.slice(fromIdx,toIdx);
 
   if(!invs.length){ showToast('لا توجد فواتير لهذا المشروع في '+monthName,'#f43f5e'); return; }
 
@@ -5462,6 +5630,61 @@ function saveVehicleExpense(){
 /* ═══════════════════════════════════
    EXTRACTS FUNCTIONS
 ═══════════════════════════════════ */
+
+function updateDSLines(projId){
+  const el=document.getElementById('ds-line');
+  if(!el) return;
+  const lines=(DB.lines||[]).filter(l=>l.projectId===projId);
+  el.innerHTML=lines.length?lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join(''):'<option value="">لا توجد بنود</option>';
+}
+
+function saveDeductStatement(){
+  const refNum=document.getElementById('ds-refnum')?.value?.trim()||'';
+  const amount=parseFloat(document.getElementById('ds-amount')?.value)||0;
+  if(!refNum) return showToast('أدخل رقم الكشف','#f43f5e');
+  if(!amount) return showToast('أدخل قيمة الكشف','#f43f5e');
+  if(!DB.deductStatements) DB.deductStatements=[];
+  DB.deductStatements.push({
+    id:uid(), refNum,
+    projectId:document.getElementById('ds-proj')?.value||'',
+    lineId:document.getElementById('ds-line')?.value||'',
+    amount, date:document.getElementById('ds-date')?.value||today(),
+    sendDate:document.getElementById('ds-senddate')?.value||'',
+    sendRef:document.getElementById('ds-sendref')?.value?.trim()||'',
+    custodyMonth:document.getElementById('ds-custody-month')?.value||'',
+    custodyType:document.getElementById('ds-custody-type')?.value||'',
+    deductStatus:document.getElementById('ds-deduct-status')?.value||'جاري التخفيض',
+    location:document.getElementById('ds-location')?.value||'',
+  });
+  saveDB(); closeModal(); render();
+  showToast('✅ تم حفظ الكشف','#10b981');
+}
+
+function exportDeductExcel(){
+  const exts=DB.deductStatements||[];
+  if(!exts.length) return showToast('لا توجد كشوف','#f43f5e');
+  const rows=[['رقم الكشف','المشروع','البند','قيمة الكشف','تاريخ الكشف','تاريخ الإرسال','رقم الإرسالية','عهدة الشهر','نوع العهدة','حالة التخفيض','موقف الكشف']];
+  exts.forEach(e=>{
+    const proj=DB.projects.find(p=>p.id===e.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===e.lineId)||{category:'—'};
+    rows.push([e.refNum||'',proj.name,line.category,e.amount||0,e.date||'',e.sendDate||'',e.sendRef||'',e.custodyMonth||'',e.custodyType||'',e.deductStatus||'',e.location||'']);
+  });
+  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='كشوف_التخفيض_'+today()+'.csv';
+  a.click();
+  showToast('✅ تم التصدير','#10b981');
+}
+
+function deleteDeductStatement(id){
+  if(!confirm('حذف هذا الكشف؟')) return;
+  DB.deductStatements=DB.deductStatements.filter(e=>e.id!==id);
+  saveDB(); render();
+  showToast('تم الحذف','#f43f5e');
+}
+
 function updateExtractLines(projId){
   const lineEl=document.getElementById('ex-line');
   if(!lineEl) return;
