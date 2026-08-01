@@ -2276,15 +2276,15 @@ function statementsHTML(){
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;">
     <div class="glass" style="padding:14px;text-align:center;">
       <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">إجمالي الكشوف</div>
-      <div style="font-weight:800;font-size:16px;color:var(--gold2);">${fmt(total)} ${SAR}</div>
+      <div class="deduct-summary-card" style="font-weight:800;font-size:16px;color:var(--gold2);">${fmt(total)} ${SAR}</div>
     </div>
     <div class="glass" style="padding:14px;text-align:center;">
       <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">تم التخفيض</div>
-      <div style="font-weight:800;font-size:16px;color:#10b981;">${fmt(deducted)} ${SAR}</div>
+      <div class="deduct-summary-card" style="font-weight:800;font-size:16px;color:#10b981;">${fmt(deducted)} ${SAR}</div>
     </div>
     <div class="glass" style="padding:14px;text-align:center;">
       <div style="font-size:10px;color:var(--text4);margin-bottom:4px;">جاري التخفيض</div>
-      <div style="font-weight:800;font-size:16px;color:#f59e0b;">${fmt(pending)} ${SAR}</div>
+      <div class="deduct-summary-card" style="font-weight:800;font-size:16px;color:#f59e0b;">${fmt(pending)} ${SAR}</div>
     </div>
   </div>
 
@@ -2319,6 +2319,26 @@ function statementsHTML(){
   </div>`;
 }
 
+function updateDeductLocation(id, location){
+  const e=DB.deductStatements.find(x=>x.id===id);
+  if(!e) return;
+  e.location=location;
+  // تحديث تلقائي لحالة التخفيض
+  if(location==='لدى الإدارة المالية') e.deductStatus='تم التخفيض';
+  else if(location==='موجود لدى إدارة المشاريع') e.deductStatus='جاري التخفيض';
+  saveDB();
+  renderStatementsTable();
+  // تحديث الملخص فوق
+  const total=(DB.deductStatements||[]).reduce((s,x)=>s+(x.amount||0),0);
+  const deducted=(DB.deductStatements||[]).filter(x=>x.deductStatus==='تم التخفيض').reduce((s,x)=>s+(x.amount||0),0);
+  const pending=total-deducted;
+  const cards=document.querySelectorAll('.deduct-summary-card');
+  if(cards[0]) cards[0].textContent=fmt(total)+' ر.س';
+  if(cards[1]) cards[1].textContent=fmt(deducted)+' ر.س';
+  if(cards[2]) cards[2].textContent=fmt(pending)+' ر.س';
+  showToast('✅ تم تحديث موقف الكشف','#10b981');
+}
+
 function renderStatementsTable(){
   const projF=document.getElementById('st-filter-proj')?.value||'';
   const deductF=document.getElementById('st-filter-deduct')?.value||'';
@@ -2350,7 +2370,10 @@ function renderStatementsTable(){
       '<td style="color:var(--text3);">'+(e.custodyMonth||'—')+'</td>'+
       '<td style="color:var(--text3);">'+(e.custodyType||'—')+'</td>'+
       '<td><span style="background:'+deductColor+'18;color:'+deductColor+';border-radius:50px;padding:3px 8px;font-size:11px;font-weight:700;">'+(e.deductStatus||'جاري التخفيض')+'</span></td>'+
-      '<td><span style="background:'+locColor+'18;color:'+locColor+';border-radius:50px;padding:3px 8px;font-size:11px;">'+(e.location||'—')+'</span></td>'+
+      '<td><select onchange="updateDeductLocation(\''+e.id+'\',this.value)" style="background:'+locColor+'18;color:'+locColor+';border:1px solid '+locColor+'44;border-radius:50px;padding:3px 8px;font-size:11px;cursor:pointer;">'+
+        '<option value="موجود لدى إدارة المشاريع" '+(e.location==="موجود لدى إدارة المشاريع"?'selected':'')+'>إدارة المشاريع</option>'+
+        '<option value="لدى الإدارة المالية" '+(e.location==="لدى الإدارة المالية"?'selected':'')+'>الإدارة المالية</option>'+
+      '</select></td>'+
       `<td><button onclick="printExtract('${e.id}')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);border-radius:6px;padding:4px 8px;color:var(--gold2);font-size:11px;cursor:pointer;">🖨</button> `+
       `<button onclick="deleteDeductStatement('${e.id}')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:13px;">🗑</button></td>`+
     '</tr>';
@@ -3424,6 +3447,9 @@ function invoicesHTML(){
   <!-- Table -->
   <div class="glass" style="overflow:hidden;">
     ${invs.length===0?'<div style="padding:40px;text-align:center;color:var(--text4);">لا توجد فواتير — أضف فاتورة جديدة</div>':`
+  <!-- ملخص الفلتر -->
+  <div id="inv-filtered-summary" style="display:none;background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.2);border-radius:10px;padding:10px 16px;margin-bottom:10px;gap:20px;flex-wrap:wrap;align-items:center;"></div>
+
     <table class="tbl">
       <thead><tr>
         <th>رقم الفاتورة</th><th>المورد</th><th>وصف الخدمة</th><th>رقم السيارة</th>
@@ -3442,13 +3468,34 @@ function renderInvTable(){
   const projId=document.getElementById('inv-filter-proj')?.value||'';
   const month=document.getElementById('inv-filter-month')?.value||'';
   let invs=DB.invoices||[];
-  if(text) invs=invs.filter(i=>(i.supplier||'').toLowerCase().includes(text)||(i.desc||'').toLowerCase().includes(text)||(i.invoiceNo||'').toLowerCase().includes(text));
+  if(text) invs=invs.filter(i=>(i.supplier||'').toLowerCase().includes(text)||(i.desc||'').toLowerCase().includes(text)||(i.invoiceNo||'').toLowerCase().includes(text)||(DB.lines.find(l=>l.id===i.lineId)?.category||'').toLowerCase().includes(text.toLowerCase()));
   if(projId) invs=invs.filter(i=>i.projectId===projId);
   if(month) invs=invs.filter(i=>{const d=i.date||''; return d.includes('-'+month+'-')||d.substring(5,7)===month;});
+
+  // حساب الإجمالي المفلتر
+  const totalAmt=invs.reduce((s,i)=>s+(i.amount||0),0);
+  const totalTax=invs.reduce((s,i)=>s+(i.tax||0),0);
+  const totalAll=invs.reduce((s,i)=>s+(i.total||0),0);
+
+  // تحديث ملخص الإجمالي
+  const summaryEl=document.getElementById('inv-filtered-summary');
+  if(summaryEl){
+    if(invs.length>0){
+      summaryEl.style.display='flex';
+      summaryEl.innerHTML=
+        '<span style="font-size:12px;color:var(--text3);">عدد الفواتير: <strong>'+invs.length+'</strong></span>'+
+        '<span style="font-size:12px;color:var(--text3);">بدون ضريبة: <strong style="color:var(--gold2);">'+fmt(totalAmt)+' '+SAR+'</strong></span>'+
+        '<span style="font-size:12px;color:var(--text3);">ضريبة: <strong style="color:#f59e0b;">'+fmt(totalTax)+' '+SAR+'</strong></span>'+
+        '<span style="font-size:12px;font-weight:800;color:#10b981;">الإجمالي: '+fmt(totalAll)+' '+SAR+'</span>';
+    } else {
+      summaryEl.style.display='none';
+    }
+  }
+
   const tbody=document.getElementById('inv-tbody');
   if(!tbody) return;
   if(!invs.length){
-    tbody.innerHTML='<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--text4);">لا توجد نتائج</td></tr>';
+    tbody.innerHTML='<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--text4);">لا توجد نتائج</td></tr>';
     return;
   }
   tbody.innerHTML=invs.map((inv)=>{
@@ -3466,9 +3513,43 @@ function renderInvTable(){
       '<td style="font-weight:700;">'+fmt(inv.amount||0)+' '+SAR+'</td>'+
       '<td style="color:#f59e0b;">'+fmt(inv.tax||0)+' '+SAR+'</td>'+
       '<td style="font-weight:700;color:#10b981;">'+fmt(inv.total||0)+' '+SAR+'</td>'+
-      '<td><button onclick="deleteInvoiceRow('+realIdx+')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:14px;">🗑</button></td>'+
+      '<td style="white-space:nowrap;">'+
+        `<button onclick="openModal('editInvoice','${inv.id}')" style="background:none;border:none;cursor:pointer;color:var(--gold2);font-size:13px;">✏️</button>`+
+        '<button onclick="deleteInvoiceRow('+realIdx+')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:14px;">🗑</button>'+
+      '</td>'+
     '</tr>';
   }).join('');
+}
+
+function updateEditInvLines(projId){
+  const el=document.getElementById('ei-line');
+  if(!el) return;
+  const lines=(DB.lines||[]).filter(l=>l.projectId===projId);
+  el.innerHTML=lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join('');
+}
+
+function saveEditInvoice(){
+  const id=document.getElementById('ei-id')?.value;
+  const inv=(DB.invoices||[]).find(x=>x.id===id);
+  if(!inv) return showToast('لم يتم العثور على الفاتورة','#f43f5e');
+  const invoiceNo=document.getElementById('ei-invno')?.value?.trim()||'';
+  const supplier=document.getElementById('ei-supplier')?.value?.trim()||'';
+  const desc=document.getElementById('ei-desc')?.value?.trim()||'';
+  const projectId=document.getElementById('ei-proj')?.value||'';
+  const lineId=document.getElementById('ei-line')?.value||'';
+  const date=document.getElementById('ei-date')?.value||today();
+  const amount=parseFloat(document.getElementById('ei-amount')?.value)||0;
+  const taxPct=parseFloat(document.getElementById('ei-tax-pct')?.value)||15;
+  const tax=Math.round(amount*taxPct/100*100)/100;
+  const total=amount+tax;
+  if(!supplier) return showToast('أدخل اسم المورد','#f43f5e');
+  if(!amount) return showToast('أدخل المبلغ','#f43f5e');
+  inv.invoiceNo=invoiceNo; inv.supplier=supplier; inv.desc=desc;
+  inv.projectId=projectId; inv.lineId=lineId; inv.date=date;
+  inv.amount=amount; inv.tax=tax; inv.total=total;
+  saveDB(); closeModal();
+  switchTab('invoices');
+  showToast('✅ تم تعديل الفاتورة','#10b981');
 }
 
 function deleteInvoiceRow(idx){
@@ -4362,7 +4443,9 @@ function getModalHTML(type,data){
     return `
     <div class="sheet-title"><h3>🖨 طباعة تقرير الفواتير</h3>${close}</div>
     <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">المشروع</div>
-    <select class="sel" id="pr-proj" style="margin-bottom:10px;">${projOpts2}</select>
+    <select class="sel" id="pr-proj" style="margin-bottom:10px;" onchange="updatePrintLines(this.value)">${projOpts2}</select>
+    <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">البند (اختياري — اتركه فاضي لطباعة كل البنود)</div>
+    <select class="sel" id="pr-line" style="margin-bottom:10px;"><option value="">كل البنود</option></select>
     <div class="form-row c2" style="margin-bottom:10px;">
       <div>
         <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">الشهر</div>
@@ -4392,9 +4475,14 @@ function getModalHTML(type,data){
       <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--text4);font-size:12px;">${SAR}</span>
     </div>
     <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">رقم الملف</div>
-    <input placeholder="مثال: QBA-2026-06" id="pr-file-no" class="inp" style="margin-bottom:16px;">
+    <input placeholder="مثال: QBA-2026-06" id="pr-file-no" class="inp" style="margin-bottom:10px;">
+    <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">تحديد نطاق الفواتير (اختياري)</div>
+    <div class="form-row c2" style="margin-bottom:16px;">
+      <input type="number" placeholder="من فاتورة رقم" id="pr-from" class="inp" min="1">
+      <input type="number" placeholder="إلى فاتورة رقم" id="pr-to" class="inp" min="1">
+    </div>
     <button class="btn btn-gold btn-full" onclick="printInvoicesReport()">🖨 طباعة التقرير</button>
-    <script>setTimeout(()=>{const s=document.getElementById('pr-emp');if(s&&s.value)autoFillEmpData(s.value);},100);<\/script>`;
+    <script>setTimeout(()=>{const s=document.getElementById('pr-emp');if(s&&s.value)autoFillEmpData(s.value);const p=document.getElementById('pr-proj');if(p&&p.value)updatePrintLines(p.value);},100);<\/script>`;
   }
 
   if(type==='addPurchaseReq'){
@@ -4607,6 +4695,41 @@ function getModalHTML(type,data){
     '<option value="لدى الإدارة المالية">لدى الإدارة المالية</option>'+
     '</select>'+
     '<button class="btn btn-gold btn-full" onclick="saveDeductStatement()">✓ حفظ الكشف</button>';
+  }
+
+  if(type==='editInvoice'){
+    const inv=(DB.invoices||[]).find(x=>x.id===data)||{};
+    const projOpts5=(DB.projects||[]).map(p=>`<option value="${p.id}" ${inv.projectId===p.id?'selected':''}>${p.name}</option>`).join('');
+    const lineOpts5=(DB.lines||[]).filter(l=>l.projectId===inv.projectId).map(l=>`<option value="${l.id}" ${inv.lineId===l.id?'selected':''}>${l.category}</option>`).join('');
+    return `
+    <div class="sheet-title"><h3>✏️ تعديل الفاتورة</h3>${close}</div>
+    <div class="form-row c2" style="margin-bottom:10px;">
+      <input placeholder="رقم الفاتورة" id="ei-invno" class="inp" value="${inv.invoiceNo||''}">
+      <input placeholder="اسم المورد" id="ei-supplier" class="inp" value="${inv.supplier||''}">
+    </div>
+    <input placeholder="وصف الخدمة" id="ei-desc" class="inp" style="margin-bottom:10px;" value="${inv.desc||''}">
+    <div class="form-row c2" style="margin-bottom:10px;">
+      <div>
+        <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">المشروع</div>
+        <select class="sel" id="ei-proj" onchange="updateEditInvLines(this.value)">${projOpts5}</select>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">البند</div>
+        <select class="sel" id="ei-line">${lineOpts5}</select>
+      </div>
+    </div>
+    <div class="form-row c2" style="margin-bottom:10px;">
+      <input type="date" id="ei-date" class="inp" value="${inv.date||today()}">
+      <input type="number" placeholder="المبلغ" id="ei-amount" class="inp" value="${inv.amount||''}">
+    </div>
+    <div class="form-row c2" style="margin-bottom:16px;">
+      <div style="position:relative;">
+        <input type="number" placeholder="الضريبة %" id="ei-tax-pct" class="inp" value="${inv.amount&&inv.tax?Math.round(inv.tax/inv.amount*100):15}">
+      </div>
+      <input type="number" placeholder="الإجمالي" id="ei-total" class="inp" value="${inv.total||''}">
+    </div>
+    <input type="hidden" id="ei-id" value="${inv.id||''}">
+    <button class="btn btn-gold btn-full" onclick="saveEditInvoice()">✓ حفظ التعديل</button>`;
   }
 
   if(type==='addLine') return `
@@ -5387,6 +5510,14 @@ function toggleCustomEmp(val){
   if(val==='__custom__') el.focus();
 }
 
+
+function updatePrintLines(projId){
+  const el=document.getElementById('pr-line');
+  if(!el) return;
+  const lines=(DB.lines||[]).filter(l=>l.projectId===projId);
+  el.innerHTML='<option value="">كل البنود</option>'+lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join('');
+}
+
 function printInvoicesReport(){
   const projId=document.getElementById('pr-proj')?.value;
   const month=+document.getElementById('pr-month')?.value;
@@ -5397,6 +5528,8 @@ function printInvoicesReport(){
   const fileNo=document.getElementById('pr-file-no')?.value?.trim()||'';
 
   const proj=DB.projects.find(p=>p.id===projId)||{name:'—'};
+  const lineId=document.getElementById('pr-line')?.value||'';
+  const lineObj=lineId?DB.lines.find(l=>l.id===lineId):null;
   const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
   const monthName=months[month-1];
   const mn=month<10?'0'+month:''+month;
@@ -5404,9 +5537,15 @@ function printInvoicesReport(){
   // Filter invoices
   let invs=(DB.invoices||[]).filter(i=>{
     if(i.projectId!==projId) return false;
+    if(lineId && i.lineId!==lineId) return false;
     const d=i.date||'';
     return d.includes(year+'-'+mn)||d.substring(3,7)===(mn+'/'+year);
   });
+
+  // Apply range filter
+  const fromIdx=(parseInt(document.getElementById('pr-from')?.value)||1)-1;
+  const toIdx=parseInt(document.getElementById('pr-to')?.value)||invs.length;
+  invs=invs.slice(fromIdx,toIdx);
 
   if(!invs.length){ showToast('لا توجد فواتير لهذا المشروع في '+monthName,'#f43f5e'); return; }
 
