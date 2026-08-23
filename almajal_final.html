@@ -4832,7 +4832,8 @@ function getModalHTML(type,data){
       <input type="number" placeholder="من فاتورة رقم" id="pr-from" class="inp" min="1">
       <input type="number" placeholder="إلى فاتورة رقم" id="pr-to" class="inp" min="1">
     </div>
-    <button class="btn btn-gold btn-full" onclick="printInvoicesReport()">🖨 طباعة التقرير</button>
+    <button class="btn btn-gold btn-full" onclick="printInvoicesReport()">🖨 طباعة PDF</button>
+    <button class="btn btn-ghost btn-full" style="margin-top:8px;" onclick="exportInvoicesReportExcel()">⬇ تصدير Excel</button>
     <script>setTimeout(()=>{const s=document.getElementById('pr-emp');if(s&&s.value)autoFillEmpData(s.value);const p=document.getElementById('pr-proj');if(p&&p.value)updatePrintLines(p.value);},100);<\/script>`;
   }
 
@@ -5867,6 +5868,66 @@ function updatePrintLines(projId){
   if(!el) return;
   const lines=(DB.lines||[]).filter(l=>l.projectId===projId);
   el.innerHTML='<option value="">كل البنود</option>'+lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join('');
+}
+
+function exportInvoicesReportExcel(){
+  const projId=document.getElementById('pr-proj')?.value;
+  const month=+document.getElementById('pr-month')?.value;
+  const year=+document.getElementById('pr-year')?.value;
+  const lineId=document.getElementById('pr-line')?.value||'';
+  const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  const monthName=months[month-1];
+  const mn=month<10?'0'+month:''+month;
+  const proj=DB.projects.find(p=>p.id===projId)||{name:'—'};
+
+  let invs=(DB.invoices||[]).filter(i=>{
+    if(i.projectId!==projId) return false;
+    if(lineId && i.lineId!==lineId) return false;
+    const d=i.date||'';
+    return d.includes(year+'-'+mn)||d.substring(3,7)===(mn+'/'+year);
+  });
+  const fromIdx=(parseInt(document.getElementById('pr-from')?.value)||1)-1;
+  const toIdx=parseInt(document.getElementById('pr-to')?.value)||invs.length;
+  invs=invs.slice(fromIdx,toIdx);
+
+  if(!invs.length) return showToast('لا توجد فواتير للتصدير','#f43f5e');
+
+  const rows=[
+    ['كشف تفصيلي فواتير — '+proj.name+' — '+monthName+' '+year],
+    [],
+    ['#','رقم الفاتورة','المورد','وصف الخدمة','رقم السيارة','البند','التاريخ','المبلغ','الضريبة','الإجمالي']
+  ];
+
+  invs.forEach((inv,idx)=>{
+    const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
+    rows.push([
+      idx+1,
+      inv.invoiceNo||'—',
+      inv.supplier||'—',
+      inv.desc||'—',
+      inv.vehicleNo||'—',
+      line.category,
+      inv.date||'—',
+      inv.amount||0,
+      inv.tax||0,
+      inv.total||0
+    ]);
+  });
+
+  // Summary rows
+  const totalAmt=invs.reduce((s,i)=>s+(i.amount||0),0);
+  const totalTax=invs.reduce((s,i)=>s+(i.tax||0),0);
+  const totalAll=invs.reduce((s,i)=>s+(i.total||0),0);
+  rows.push([]);
+  rows.push(['','','','','','','الإجمالي',totalAmt,totalTax,totalAll]);
+
+  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='كشف_فواتير_'+proj.name+'_'+monthName+'_'+year+'.csv';
+  a.click();
+  showToast('✅ تم تصدير Excel','#10b981');
 }
 
 function printInvoicesReport(){
