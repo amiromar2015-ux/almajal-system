@@ -50,7 +50,6 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 <title>شركة مجموعة المجال العربي — نظام إدارة التكاليف</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&family=Noto+Kufi+Arabic:wght@400;500;600;700;800;900&family=Tajawal:wght@300;400;500;700;800&display=swap');
 :root {
@@ -1966,7 +1965,7 @@ function exportClaimsExcel(){
     const line=DB.lines.find(l=>l.id===c.budgetLineId)||{category:'—'};
     rows.push([monthName,c.date||'',c.supplier||'',c.invoiceNo||'',proj.name,line.category,c.amount||0,c.status==='paid'?'مدفوع':'معلق',c.notes||'']);
   });
-  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
@@ -5670,7 +5669,7 @@ function printCustody(id){
         <div class="field"><div class="field-label">البند</div><div class="field-value">${line.category}</div></div>
         <div class="field"><div class="field-label">نوع العهدة</div><div class="field-value">${typeLabel}</div></div>
       </div>
-      <div class="row">
+  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
         <div class="field"><div class="field-label">تاريخ الصرف</div><div class="field-value">${c.issuedAt||today()}</div></div>
         <div class="field"><div class="field-label">طريقة الدفع</div><div class="field-value">${vaultLabel}</div></div>
       </div>
@@ -5892,43 +5891,25 @@ function exportInvoicesReportExcel(){
 
   if(!invs.length) return showToast('لا توجد فواتير للتصدير','#f43f5e');
 
-  const rows=[
-    ['كشف تفصيلي فواتير — '+proj.name+' — '+monthName+' '+year],
-    [],
-    ['#','رقم الفاتورة','المورد','وصف الخدمة','رقم السيارة','البند','التاريخ','المبلغ','الضريبة','الإجمالي']
-  ];
-
+  const rows=[['#','رقم الفاتورة','المورد','وصف الخدمة','رقم السيارة','البند','التاريخ','المبلغ','الضريبة','الإجمالي']];
   invs.forEach((inv,idx)=>{
     const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
-    rows.push([
-      idx+1,
-      inv.invoiceNo||'—',
-      inv.supplier||'—',
-      inv.desc||'—',
-      inv.vehicleNo||'—',
-      line.category,
-      inv.date||'—',
-      inv.amount||0,
-      inv.tax||0,
-      inv.total||0
-    ]);
+    rows.push([idx+1,inv.invoiceNo||'—',inv.supplier||'—',inv.desc||'—',inv.vehicleNo||'—',line.category,inv.date||'—',inv.amount||0,inv.tax||0,inv.total||0]);
   });
-
-  // Summary rows
   const totalAmt=invs.reduce((s,i)=>s+(i.amount||0),0);
   const totalTax=invs.reduce((s,i)=>s+(i.tax||0),0);
   const totalAll=invs.reduce((s,i)=>s+(i.total||0),0);
-  rows.push([]);
   rows.push(['','','','','','','الإجمالي',totalAmt,totalTax,totalAll]);
 
   const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
-  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download='كشف_فواتير_'+proj.name+'_'+monthName+'_'+year+'.csv';
   a.click();
   showToast('✅ تم تصدير Excel','#10b981');
 }
+
 
 function printInvoicesReport(){
   const projId=document.getElementById('pr-proj')?.value;
