@@ -4833,6 +4833,7 @@ function getModalHTML(type,data){
     </div>
     <button class="btn btn-gold btn-full" onclick="printInvoicesReport()">🖨 طباعة PDF</button>
     <button class="btn btn-ghost btn-full" style="margin-top:8px;" onclick="exportInvoicesReportExcel()">⬇ تصدير Excel</button>
+    <button style="margin-top:8px;background:linear-gradient(135deg,#6366f1,#4f46e5);color:white;border:none;border-radius:10px;padding:12px;width:100%;font-family:var(--font);font-weight:700;font-size:13px;cursor:pointer;" onclick="printInvoicesReport();setTimeout(exportInvoicesReportExcel,500);">🖨 + ⬇ طباعة وتصدير معاً</button>
     <script>setTimeout(()=>{const s=document.getElementById('pr-emp');if(s&&s.value)autoFillEmpData(s.value);const p=document.getElementById('pr-proj');if(p&&p.value)updatePrintLines(p.value);},100);<\/script>`;
   }
 
