@@ -236,6 +236,8 @@ select option{background:#ffffff;}
 ═══════════════════════════════════ */
 const COMPANY = 'شركة مجموعة المجال العربي';
 const STORAGE_KEY = 'almajal_v1';
+const SYSTEM_VERSION = '202608260922';
+const VEH_TYPES = ['سيارة خفيفة','بيك أب','شاحنة صغيرة','شاحنة كبيرة','جرار','معدة ثقيلة','دراجة نارية','أخرى'];
 const SAR = 'ر.س';
 const CATS = [
   'عمالة',
@@ -358,6 +360,7 @@ let DB = {
   vehicleExpenses:[], // مصروفات: {id, vehicleId, projectId, type(fuel/maintenance), amount, liters, date, note, odometer}
   monthlyBudgets:[],  // ميزانيات شهرية: {id, lineId, month, year, amount}
   companyName:'شركة مجموعة المجال العربي', // اسم الشركة
+  currentUserId:'', // المستخدم الحالي للنظام
   fixedExpenses:[], // مصاريف ثابتة شهرية: {id, name, amount, dueDay, category, payments[]}
   tasks:[], // مهام وتذكيرات: {id, title, assignedTo, dueDate, status, notes}
   deductStatements:[], // كشوف التخفيض
@@ -367,6 +370,18 @@ let DB = {
 };
 
 function saveDB(){ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(DB));}catch(e){} if(window._fbSave) window._fbSave(); }
+function checkVersion(){
+  const savedVersion=localStorage.getItem('almajal_version');
+  if(savedVersion && savedVersion!==SYSTEM_VERSION){
+    // نسخة جديدة — امسح الكاش المحلي واحفظ النسخة الجديدة
+    console.log('تحديث النظام من',savedVersion,'إلى',SYSTEM_VERSION);
+    localStorage.setItem('almajal_version',SYSTEM_VERSION);
+    // لا نمسح البيانات — بس نسجل النسخة الجديدة
+  } else if(!savedVersion){
+    localStorage.setItem('almajal_version',SYSTEM_VERSION);
+  }
+}
+
 function loadDB(){
   try{
     const r=localStorage.getItem(STORAGE_KEY);
@@ -1622,12 +1637,16 @@ function renderClaimsTable(){
   const text=(document.getElementById('cl-filter-text')?.value||'').toLowerCase();
   const month=document.getElementById('cl-filter-month')?.value||'';
   const status=document.getElementById('cl-filter-status')?.value||'';
+  const projF=document.getElementById('cl-filter-proj')?.value||'';
+  const lineF2=document.getElementById('cl-filter-line')?.value||'';
   const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
 
   let claims=[...DB.claims].reverse();
   if(text) claims=claims.filter(c=>(c.supplier||'').toLowerCase().includes(text)||(c.invoiceNo||'').toLowerCase().includes(text));
   if(month) claims=claims.filter(c=>(c.date||'').substring(5,7)===month);
   if(status) claims=claims.filter(c=>c.status===status);
+  if(projF) claims=claims.filter(c=>c.projectId===projF);
+  if(lineF2) claims=claims.filter(c=>c.budgetLineId===lineF2);
 
   // ملخص الفلتر
   const totalAmt=claims.reduce((s,c)=>s+(c.amount||0),0);
@@ -1709,8 +1728,16 @@ function suppHTML(){
   </div>
 
   <!-- Filters -->
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
-    <input placeholder="🔍 بحث بالمورد أو الملاحظات..." id="cl-filter-text" class="inp" style="font-size:12px;" oninput="renderClaimsTable()">
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
+    <select class="sel" id="cl-filter-proj" style="font-size:12px;" onchange="updateClaimLineFilter(this.value);renderClaimsTable()">
+      <option value="">كل المشاريع</option>
+      ${(DB.projects||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}
+    </select>
+    <select class="sel" id="cl-filter-line" style="font-size:12px;" onchange="renderClaimsTable()">
+      <option value="">كل البنود</option>
+      ${(DB.lines||[]).map(l=>`<option value="${l.id}">${l.category}</option>`).join('')}
+    </select>
+    <input placeholder="🔍 بحث بالمورد..." id="cl-filter-text" class="inp" style="font-size:12px;" oninput="renderClaimsTable()">
     <select class="sel" id="cl-filter-month" style="font-size:12px;" onchange="renderClaimsTable()">
       <option value="">كل الأشهر</option>
       ${['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'].map((m,i)=>'<option value="'+(i+1<10?'0'+(i+1):''+(i+1))+'">'+m+'</option>').join('')}
@@ -2417,6 +2444,15 @@ function renderStatementsTable(){
   if(deductF) exts=exts.filter(e=>e.deductStatus===deductF);
   if(locF) exts=exts.filter(e=>e.location===locF);
 
+  // تحديث الملخص المفلتر
+  const filtTotal=exts.reduce((s,e)=>s+(e.amount||0),0);
+  const filtDeducted=exts.filter(e=>e.deductStatus==='تم التخفيض').reduce((s,e)=>s+(e.amount||0),0);
+  const filtPending=filtTotal-filtDeducted;
+  const cards=document.querySelectorAll('.deduct-summary-card');
+  if(cards[0]) cards[0].textContent=fmt(filtTotal)+' '+SAR;
+  if(cards[1]) cards[1].textContent=fmt(filtDeducted)+' '+SAR;
+  if(cards[2]) cards[2].textContent=fmt(filtPending)+' '+SAR;
+
   const tbody=document.getElementById('st-tbody');
   if(!tbody) return;
   if(!exts.length){
@@ -2449,6 +2485,193 @@ function renderStatementsTable(){
   }).join('');
 }
 
+
+
+function printVehicleReport(plateOrId){
+  // Find vehicle
+  const veh=DB.vehicles.find(v=>v.id===plateOrId||v.plate===plateOrId);
+  if(!veh){ showToast('السيارة غير موجودة','#f43f5e'); return; }
+  
+  const proj=DB.projects.find(p=>p.id===veh.projectId)||{name:'—'};
+  const companyName=DB.companyName||COMPANY;
+  const logo=DB.logo?`<img src="${DB.logo}" style="width:55px;height:55px;object-fit:contain;border-radius:8px;">`
+    :'<div style="width:55px;height:55px;background:#f5f0e8;border:2px solid #b8892a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:26px;">🚗</div>';
+
+  // Get all invoices for this vehicle
+  const invs=(DB.invoices||[]).filter(i=>i.vehicleNo&&i.vehicleNo===veh.plate);
+  const totalInv=invs.reduce((s,i)=>s+(i.total||0),0);
+
+  // Get vehicle expenses
+  const exps=(DB.vehicleExpenses||[]).filter(e=>e.vehicleId===veh.id);
+  const totalFuel=exps.filter(e=>e.type==='fuel').reduce((s,e)=>s+e.amount,0);
+  const totalMaint=exps.filter(e=>e.type==='maintenance').reduce((s,e)=>s+e.amount,0);
+  const totalLiters=exps.filter(e=>e.type==='fuel').reduce((s,e)=>s+(e.liters||0),0);
+  const totalExpenses=totalFuel+totalMaint;
+
+  // Group invoices by month
+  const byMonth={};
+  invs.forEach(i=>{
+    const m=(i.date||'').substring(0,7);
+    if(!byMonth[m]) byMonth[m]=[];
+    byMonth[m].push(i);
+  });
+
+  const months=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+
+  const css=`<style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:Arial,sans-serif;padding:12mm 15mm;direction:rtl;font-size:13px;}
+    .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1a5276;padding-bottom:12px;margin-bottom:16px;}
+    .logo-area{display:flex;align-items:center;gap:12px;}
+    .company-name{font-size:16px;font-weight:900;color:#1a5276;}
+    .title h2{font-size:17px;font-weight:900;color:#b8892a;}
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;}
+    .card{background:#f8f9fa;border-radius:8px;padding:10px;text-align:center;}
+    .card-label{font-size:9px;color:#888;margin-bottom:3px;}
+    .card-value{font-size:14px;font-weight:800;}
+    .veh-info{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}
+    .field{background:#f0f4f8;border-radius:6px;padding:8px 12px;}
+    .field-label{font-size:9px;color:#888;margin-bottom:2px;}
+    .field-value{font-size:12px;font-weight:700;color:#1a5276;}
+    table{width:100%;border-collapse:collapse;margin-bottom:14px;}
+    th{background:#1a5276;color:white;padding:7px 8px;font-size:11px;text-align:right;}
+    td{padding:6px 8px;border-bottom:1px solid #e0e0e0;font-size:11px;}
+    tr:nth-child(even) td{background:#f8f9fa;}
+    .section-title{font-size:13px;font-weight:800;color:#1a5276;margin:14px 0 8px;}
+    .total-row td{font-weight:800;background:#e8f4f8 !important;}
+  </style>`;
+
+  let invRows='';
+  if(invs.length){
+    invRows=`<div class="section-title">📋 الفواتير (${invs.length} فاتورة)</div>
+    <table>
+      <thead><tr><th>#</th><th>التاريخ</th><th>المورد</th><th>وصف الخدمة</th><th>البند</th><th>المبلغ</th><th>الضريبة</th><th>الإجمالي</th></tr></thead>
+      <tbody>
+      ${[...invs].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map((inv,idx)=>{
+        const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
+        return `<tr>
+          <td>${idx+1}</td>
+          <td>${inv.date||'—'}</td>
+          <td>${inv.supplier||'—'}</td>
+          <td>${inv.desc||'—'}</td>
+          <td>${line.category}</td>
+          <td>${fmt(inv.amount||0)} ر.س</td>
+          <td>${fmt(inv.tax||0)} ر.س</td>
+          <td style="font-weight:700;color:#059669;">${fmt(inv.total||0)} ر.س</td>
+        </tr>`;
+      }).join('')}
+      <tr class="total-row">
+        <td colspan="5">الإجمالي</td>
+        <td>${fmt(invs.reduce((s,i)=>s+(i.amount||0),0))} ر.س</td>
+        <td>${fmt(invs.reduce((s,i)=>s+(i.tax||0),0))} ر.س</td>
+        <td>${fmt(totalInv)} ر.س</td>
+      </tr>
+      </tbody>
+    </table>`;
+  }
+
+  let expRows='';
+  if(exps.length){
+    expRows=`<div class="section-title">⛽ مصروفات السيارة (${exps.length} عملية)</div>
+    <table>
+      <thead><tr><th>#</th><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>لترات</th><th>ملاحظات</th></tr></thead>
+      <tbody>
+      ${[...exps].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map((exp,idx)=>`<tr>
+        <td>${idx+1}</td>
+        <td>${exp.date||'—'}</td>
+        <td>${exp.type==='fuel'?'⛽ محروقات':'🔧 صيانة'}</td>
+        <td style="font-weight:700;">${fmt(exp.amount||0)} ر.س</td>
+        <td>${exp.liters?exp.liters+' لتر':'—'}</td>
+        <td>${exp.note||'—'}</td>
+      </tr>`).join('')}
+      <tr class="total-row">
+        <td colspan="3">الإجمالي</td>
+        <td>${fmt(totalExpenses)} ر.س</td>
+        <td>${totalLiters} لتر</td>
+        <td></td>
+      </tr>
+      </tbody>
+    </table>`;
+  }
+
+  const html=`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8">${css}</head><body>
+  <div class="header">
+    <div class="logo-area">${logo}<div><div class="company-name">${companyName}</div></div></div>
+    <div class="title"><h2>تقرير السيارة / المعدة</h2><p style="font-size:11px;color:#666;margin-top:3px;">تاريخ الطباعة: ${today()}</p></div>
+  </div>
+
+  <div class="veh-info">
+    <div class="field"><div class="field-label">اسم السيارة</div><div class="field-value">${veh.name||'—'}</div></div>
+    <div class="field"><div class="field-label">رقم اللوحة</div><div class="field-value">${veh.plate||'—'}</div></div>
+    <div class="field"><div class="field-label">النوع</div><div class="field-value">${veh.type||'—'}</div></div>
+    <div class="field"><div class="field-label">المشروع</div><div class="field-value">${proj.name}</div></div>
+    <div class="field"><div class="field-label">الحالة</div><div class="field-value">${veh.status||'—'}</div></div>
+    <div class="field"><div class="field-label">السنة</div><div class="field-value">${veh.year||'—'}</div></div>
+  </div>
+
+  <div class="summary">
+    <div class="card"><div class="card-label">إجمالي الفواتير</div><div class="card-value" style="color:#1a5276;">${fmt(totalInv)} ر.س</div></div>
+    <div class="card"><div class="card-label">محروقات</div><div class="card-value" style="color:#d97706;">${fmt(totalFuel)} ر.س</div></div>
+    <div class="card"><div class="card-label">صيانة</div><div class="card-value" style="color:#dc2626;">${fmt(totalMaint)} ر.س</div></div>
+    <div class="card"><div class="card-label">إجمالي المصروفات</div><div class="card-value" style="color:#059669;">${fmt(totalInv+totalExpenses)} ر.س</div></div>
+  </div>
+
+  ${invRows}
+  ${expRows}
+
+  <script>window.onload=()=>window.print();<\/script>
+  </body></html>`;
+
+  const win=window.open('','_blank');
+  win.document.write(html);
+  win.document.close();
+}
+
+function downloadVehicleTemplate(){
+  const projNames=(DB.projects||[]).map(p=>p.name).join(' / ');
+  const csv='\uFEFFاسم السيارة,رقم اللوحة,النوع,المشروع\n'+
+    'مثال: كامري,أ ب ج 1234,سيارة خفيفة,'+(DB.projects[0]?.name||'اسم المشروع')+'\n'+
+    ',,أنواع متاحة: '+VEH_TYPES.join(' - ')+',مشاريع: '+projNames;
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='نموذج_السيارات.csv';
+  a.click();
+  showToast('✅ تم تنزيل النموذج','#10b981');
+}
+
+function handleVehicleImport(input){
+  const file=input.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const text=e.target.result;
+    const lines=text.split('\n').slice(1); // تخطي أول سطر (العناوين)
+    let count=0, skipped=0;
+    lines.forEach(line=>{
+      if(!line.trim()) return;
+      const cols=line.split(',').map(c=>c.replace(/^"|"$/g,'').trim());
+      const name=cols[0]||'';
+      const plate=cols[1]||'';
+      const type=cols[2]||VEH_TYPES[0];
+      const projName=cols[3]||'';
+      if(!name) return;
+      // تحقق من عدم التكرار
+      if(DB.vehicles.find(v=>v.plate===plate&&plate)) { skipped++; return; }
+      const proj=DB.projects.find(p=>p.name===projName);
+      DB.vehicles.push({
+        id:uid(), name, plate,
+        type: VEH_TYPES.includes(type)?type:VEH_TYPES[0],
+        projectId: proj?proj.id:'',
+        status:'شغال', year:'', odometer:0, notes:''
+      });
+      count++;
+    });
+    saveDB(); render();
+    showToast(`✅ تم استيراد ${count} سيارة${skipped?' (تم تخطي '+skipped+' مكررة)':''}`, '#10b981');
+    input.value='';
+  };
+  reader.readAsText(file,'UTF-8');
+}
 
 function vehiclesHTML(){
   const vehicles = DB.vehicles||[];
@@ -2484,6 +2707,9 @@ function vehiclesHTML(){
     <div style="font-weight:800;font-size:16px;">🚗 السيارات والمعدات</div>
     <div style="display:flex;gap:8px;">
       <button onclick="openModal('addVehicleExpense')" class="btn btn-ghost btn-pill btn-sm" style="border-color:rgba(245,158,11,0.3);color:#fcd34d;">⛽ تسجيل مصروف</button>
+      <button onclick="downloadVehicleTemplate()" class="btn btn-ghost btn-pill btn-sm">⬇ نموذج Excel</button>
+      <button onclick="document.getElementById('veh-import-input').click()" class="btn btn-ghost btn-pill btn-sm">⬆ استيراد Excel</button>
+      <input type="file" id="veh-import-input" accept=".csv" style="display:none;" onchange="handleVehicleImport(this)">
       <button onclick="openModal('addVehicle')" class="btn btn-gold btn-pill btn-sm">+ إضافة سيارة</button>
     </div>
   </div>
@@ -3045,10 +3271,29 @@ function fixedExpHTML(){
     const totalPaid=(e.payments||[]).reduce((s,p)=>s+(p.amount||e.amount||0),0);
     rows+='<tr>'+
       '<td style="font-weight:600;">'+e.name+'</td>'+
+      '<td style="color:var(--text3);font-size:11px;">'+(e.accountNo||'—')+'</td>'+
       '<td style="color:var(--text3);">'+(e.category||'—')+'</td>'+
       '<td style="text-align:center;font-weight:700;">'+fmt(e.amount)+' '+SAR+'</td>'+
       '<td style="text-align:center;">'+(e.dueDay||'—')+'</td>'+
-      '<td style="text-align:center;color:var(--text3);">'+fmt(totalPaid)+' '+SAR+'</td>'+
+      (() => {
+        if(!e.dueDay) return '<td style="color:var(--text4);">—</td>';
+        const now=new Date();
+        const day=parseInt(e.dueDay);
+        const lastPay=(e.payments||[]).slice(-1)[0];
+        let nextDate;
+        if(lastPay){
+          const lastDate=new Date(lastPay.year,lastPay.month-1,day);
+          nextDate=new Date(lastDate);
+          nextDate.setMonth(nextDate.getMonth()+1);
+        } else {
+          nextDate=new Date(now.getFullYear(),now.getMonth(),day);
+          if(nextDate<now) nextDate.setMonth(nextDate.getMonth()+1);
+        }
+        const daysLeft=Math.ceil((nextDate-now)/86400000);
+        const color=daysLeft<=0?'#f43f5e':daysLeft<=3?'#f59e0b':'#10b981';
+        const text=daysLeft<=0?'اليوم!':daysLeft===1?'غداً':'بعد '+daysLeft+' يوم';
+        return '<td style="color:'+color+';font-weight:700;">'+text+'</td>';
+      })()+
       '<td>'+(paidNow?'<span style="background:rgba(16,185,129,0.1);color:#10b981;border-radius:50px;padding:3px 10px;font-size:11px;">✓ مدفوع هذا الشهر</span>':'<button onclick="payFixedExpense('+realIdx+')" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:6px;padding:4px 10px;color:#10b981;font-size:11px;cursor:pointer;">دفع هذا الشهر</button>')+'</td>'+
       '<td><button onclick="deleteFixedExpense('+realIdx+')" style="background:none;border:none;cursor:pointer;color:#f43f5e;font-size:14px;">🗑</button></td>'+
     '</tr>';
@@ -3078,7 +3323,7 @@ function fixedExpHTML(){
   <div class="glass" style="overflow:hidden;">
     ${exps.length===0?'<div style="padding:40px;text-align:center;color:var(--text4);">لا توجد مصاريف ثابتة — أضف مصروف جديد</div>':`
     <table class="tbl">
-      <thead><tr><th>البيان</th><th>النوع</th><th>المبلغ الشهري</th><th>يوم الاستحقاق</th><th>إجمالي المدفوع</th><th>هذا الشهر</th><th></th></tr></thead>
+      <thead><tr><th>البيان</th><th>رقم الحساب</th><th>النوع</th><th>المبلغ الشهري</th><th>يوم الاستحقاق</th><th>الموعد القادم</th><th>هذا الشهر</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`}
   </div>`;
@@ -3108,7 +3353,8 @@ function saveFixedExpense(){
   if(!name) return showToast('أدخل اسم المصروف','#f43f5e');
   if(!amount) return showToast('أدخل المبلغ','#f43f5e');
   if(!DB.fixedExpenses) DB.fixedExpenses=[];
-  DB.fixedExpenses.push({id:uid(),name,category,amount,dueDay,payments:[]});
+  const accountNo=document.getElementById('fe-account')?.value?.trim()||'';
+  DB.fixedExpenses.push({id:uid(),name,category,amount,dueDay,accountNo,payments:[]});
   saveDB(); closeModal(); render();
   showToast('✅ تم إضافة المصروف الثابت','#10b981');
 }
@@ -3445,7 +3691,7 @@ function invoicesHTML(){
   <!-- Filters -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;margin-bottom:14px;">
     <input placeholder="🔍 بحث بالمورد أو الوصف" id="inv-filter-text" class="inp" style="font-size:12px;" oninput="renderInvTable()">
-    <select class="sel" id="inv-filter-proj" style="font-size:12px;" onchange="renderInvTable()">
+    <select class="sel" id="inv-filter-proj" style="font-size:12px;" onchange="updateInvLineFilter(this.value);renderInvTable();">
       <option value="">كل المشاريع</option>
       ${projOpts}
     </select>
@@ -3455,7 +3701,7 @@ function invoicesHTML(){
     </select>
     <select class="sel" id="inv-filter-line" style="font-size:12px;" onchange="renderInvTable()">
       <option value="">كل البنود</option>
-      ${(DB.lines||[]).map(l=>`<option value="${l.id}">${l.category}</option>`).join('')}
+      ${(()=>{const pId=document.getElementById?document.getElementById('inv-filter-proj')?.value||'':DB.projects[0]?.id||''; return (DB.lines||[]).filter(l=>!pId||l.projectId===pId).map(l=>`<option value="${l.id}">${l.category}</option>`).join('');})()}
     </select>
     <button onclick="document.getElementById('inv-filter-text').value='';document.getElementById('inv-filter-proj').value='';document.getElementById('inv-filter-month').value='';document.getElementById('inv-filter-line').value='';renderInvTable();" class="btn btn-ghost btn-pill btn-sm">مسح</button>
   </div>
@@ -3544,7 +3790,7 @@ function renderInvTable(){
   const projId=document.getElementById('inv-filter-proj')?.value||'';
   const month=document.getElementById('inv-filter-month')?.value||'';
   let invs=DB.invoices||[];
-  if(text) invs=invs.filter(i=>(i.supplier||'').toLowerCase().includes(text)||(i.desc||'').toLowerCase().includes(text)||(i.invoiceNo||'').toLowerCase().includes(text)||(DB.lines.find(l=>l.id===i.lineId)?.category||'').toLowerCase().includes(text.toLowerCase()));
+  if(text) invs=invs.filter(i=>(i.supplier||'').toLowerCase().includes(text)||(i.desc||'').toLowerCase().includes(text)||(i.invoiceNo||'').toLowerCase().includes(text)||(i.vehicleNo||'').toLowerCase().includes(text)||(DB.lines.find(l=>l.id===i.lineId)?.category||'').toLowerCase().includes(text));
   if(projId) invs=invs.filter(i=>i.projectId===projId);
   if(month) invs=invs.filter(i=>{const d=i.date||''; return d.includes('-'+month+'-')||d.substring(5,7)===month;});
   const lineF=document.getElementById('inv-filter-line')?.value||'';
@@ -4315,7 +4561,10 @@ async function forceReloadFromCloud(){
 
 function settingsHTML(){
   return `
-  <div style="font-weight:800;font-size:16px;margin-bottom:20px;">⚙ الإعدادات</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+    <div style="font-weight:800;font-size:16px;">⚙ الإعدادات</div>
+    <div style="font-size:11px;color:var(--text4);background:rgba(99,102,241,0.08);padding:4px 10px;border-radius:50px;">الإصدار: 202608260922</div>
+  </div>
 
   <!-- Current User Setting -->
   <div class="glass" style="padding:16px;margin-bottom:16px;">
@@ -4857,6 +5106,7 @@ function getModalHTML(type,data){
     return `
     <div class="sheet-title"><h3>🏢 مصروف ثابت جديد</h3>${close}</div>
     <input placeholder="اسم المصروف (مثال: إيجار المكتب)" id="fe-name" class="inp" style="margin-bottom:10px;" autofocus>
+    <input placeholder="رقم الحساب / العداد (اختياري)" id="fe-account" class="inp" style="margin-bottom:10px;">
     <div style="font-size:11px;color:var(--text4);margin-bottom:5px;">النوع</div>
     <select class="sel" id="fe-category" style="margin-bottom:10px;">
       ${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}
@@ -5670,7 +5920,6 @@ function printCustody(id){
         <div class="field"><div class="field-label">البند</div><div class="field-value">${line.category}</div></div>
         <div class="field"><div class="field-label">نوع العهدة</div><div class="field-value">${typeLabel}</div></div>
       </div>
-  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
         <div class="field"><div class="field-label">تاريخ الصرف</div><div class="field-value">${c.issuedAt||today()}</div></div>
         <div class="field"><div class="field-label">طريقة الدفع</div><div class="field-value">${vaultLabel}</div></div>
       </div>
@@ -5862,6 +6111,21 @@ function toggleCustomEmp(val){
   if(val==='__custom__') el.focus();
 }
 
+
+function updateClaimLineFilter(projId){
+  const el=document.getElementById('cl-filter-line');
+  if(!el) return;
+  const lines=(DB.lines||[]).filter(l=>!projId||l.projectId===projId);
+  el.innerHTML='<option value="">كل البنود</option>'+lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join('');
+}
+
+function updateInvLineFilter(projId){
+  const el=document.getElementById('inv-filter-line');
+  if(!el) return;
+  const lines=(DB.lines||[]).filter(l=>!projId||l.projectId===projId);
+  el.innerHTML='<option value="">كل البنود</option>'+lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join('');
+  renderInvTable();
+}
 
 function updatePrintLines(projId){
   const el=document.getElementById('pr-line');
@@ -7146,6 +7410,7 @@ function showToast(msg,col='#10b981'){
 /* ═══════════════════════════════════
    INIT
 ═══════════════════════════════════ */
+checkVersion();
 loadDB();
 render();
 
