@@ -3691,7 +3691,7 @@ function invoicesHTML(){
   <!-- Filters -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;margin-bottom:14px;">
     <input placeholder="🔍 بحث بالمورد أو الوصف" id="inv-filter-text" class="inp" style="font-size:12px;" oninput="renderInvTable()">
-    <select class="sel" id="inv-filter-proj" style="font-size:12px;" onchange="updateInvLineFilter(this.value);renderInvTable();">
+    <select class="sel" id="inv-filter-proj" style="font-size:12px;" onchange="updateInvLineFilter(this.value);">
       <option value="">كل المشاريع</option>
       ${projOpts}
     </select>
@@ -6152,8 +6152,15 @@ function hideDescSuggestions(){
 function updateInvLineFilter(projId){
   const el=document.getElementById('inv-filter-line');
   if(!el) return;
-  const lines=(DB.lines||[]).filter(l=>!projId||l.projectId===projId);
-  el.innerHTML='<option value="">كل البنود</option>'+lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join('');
+  if(projId){
+    // مشروع محدد — بنوده بس
+    const lines=(DB.lines||[]).filter(l=>l.projectId===projId);
+    el.innerHTML='<option value="">كل البنود</option>'+lines.map(l=>'<option value="'+l.category+'">'+l.category+'</option>').join('');
+  } else {
+    // كل المشاريع — كل البنود بأسمائها بدون تكرار
+    const allCats=[...new Set((DB.lines||[]).map(l=>l.category))];
+    el.innerHTML='<option value="">كل البنود</option>'+allCats.map(c=>'<option value="'+c+'">'+c+'</option>').join('');
+  }
   renderInvTable();
 }
 
