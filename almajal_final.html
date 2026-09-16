@@ -3701,7 +3701,7 @@ function invoicesHTML(){
     </select>
     <select class="sel" id="inv-filter-line" style="font-size:12px;" onchange="renderInvTable()">
       <option value="">كل البنود</option>
-      ${(()=>{const pId=document.getElementById?document.getElementById('inv-filter-proj')?.value||'':DB.projects[0]?.id||''; return (DB.lines||[]).filter(l=>!pId||l.projectId===pId).map(l=>`<option value="${l.id}">${l.category}</option>`).join('');})()}
+      ${[...new Set((DB.lines||[]).map(l=>l.category))].map(cat=>`<option value="${cat}">${cat}</option>`).join('')}
     </select>
     <button onclick="document.getElementById('inv-filter-text').value='';document.getElementById('inv-filter-proj').value='';document.getElementById('inv-filter-month').value='';document.getElementById('inv-filter-line').value='';renderInvTable();" class="btn btn-ghost btn-pill btn-sm">مسح</button>
   </div>
@@ -3794,7 +3794,7 @@ function renderInvTable(){
   if(projId) invs=invs.filter(i=>i.projectId===projId);
   if(month) invs=invs.filter(i=>{const d=i.date||''; return d.includes('-'+month+'-')||d.substring(5,7)===month;});
   const lineF=document.getElementById('inv-filter-line')?.value||'';
-  if(lineF) invs=invs.filter(i=>i.lineId===lineF);
+  if(lineF) invs=invs.filter(i=>(DB.lines.find(l=>l.id===i.lineId)?.category||'')=== lineF);
 
   // حساب الإجمالي المفلتر
   const totalAmt=invs.reduce((s,i)=>s+(i.amount||0),0);
@@ -4865,7 +4865,10 @@ function getModalHTML(type,data){
     <div style="font-size:12px;font-weight:700;color:var(--indigo);margin-bottom:8px;">📄 الفواتير</div>
     <div id="inv-list"></div>
     <div style="display:grid;grid-template-columns:1fr 90px 30px;gap:7px;margin-top:10px;margin-bottom:8px;">
-      <input placeholder="البيان" id="new-inv-desc" class="inp" style="padding:9px 12px;font-size:12px;">
+      <div style="position:relative;">
+        <input placeholder="البيان" id="new-inv-desc" class="inp" style="padding:9px 12px;font-size:12px;" oninput="showDescSuggestions(this.value)" onblur="setTimeout(()=>hideDescSuggestions(),200)" autocomplete="off">
+        <div id="desc-suggestions" style="display:none;position:absolute;top:100%;right:0;left:0;background:var(--glass);border:1px solid rgba(255,255,255,0.1);border-radius:8px;z-index:999;max-height:180px;overflow-y:auto;"></div>
+      </div>
       <input type="number" placeholder="المبلغ" id="new-inv-amt" class="inp" style="padding:9px 10px;font-size:12px;text-align:center;" onkeydown="if(event.key==='Enter')addInvoice()">
       <button onclick="addInvoice()" style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.3);border-radius:10px;color:#a5b4fc;cursor:pointer;font-size:18px;font-weight:800;">+</button>
     </div>
@@ -6117,6 +6120,33 @@ function updateClaimLineFilter(projId){
   if(!el) return;
   const lines=(DB.lines||[]).filter(l=>!projId||l.projectId===projId);
   el.innerHTML='<option value="">كل البنود</option>'+lines.map(l=>'<option value="'+l.id+'">'+l.category+'</option>').join('');
+}
+
+function showDescSuggestions(val){
+  const el=document.getElementById('desc-suggestions');
+  if(!el) return;
+  if(!val||val.length<2){ el.style.display='none'; return; }
+  // جمع كل الأوصاف الفريدة من الفواتير
+  const descs=[...new Set((DB.invoices||[])
+    .map(i=>i.desc||'')
+    .filter(d=>d&&d.includes(val))
+  )].slice(0,8);
+  if(!descs.length){ el.style.display='none'; return; }
+  el.style.display='block';
+  el.innerHTML=descs.map(d=>
+    `<div onclick="selectDesc('${d.replace(/'/g,"\\'")}') " style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(212,168,67,0.1)'" onmouseout="this.style.background=''">${d}</div>`
+  ).join('');
+}
+
+function selectDesc(val){
+  const el=document.getElementById('new-inv-desc');
+  if(el) el.value=val;
+  hideDescSuggestions();
+}
+
+function hideDescSuggestions(){
+  const el=document.getElementById('desc-suggestions');
+  if(el) el.style.display='none';
 }
 
 function updateInvLineFilter(projId){
