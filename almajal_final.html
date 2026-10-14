@@ -187,6 +187,7 @@ select option{background:#ffffff;}
 .print-only{display:none;}
 .print-header{display:none;}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
@@ -482,6 +483,53 @@ function initFirebase(){
 setTimeout(initFirebase, 1000);
 
 /* ═══════════════════════════════════
+   AUTO BACKUP
+═══════════════════════════════════ */
+function autoBackupJSON(){
+  try{
+    const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='المجال_backup_'+today()+'.json';
+    a.click();
+    localStorage.setItem('almajal_last_weekly_backup', Date.now().toString());
+    showToast('✅ تم تنزيل نسخة احتياطية أسبوعية تلقائياً','#10b981');
+  }catch(e){ console.log('backup error',e); }
+}
+
+function checkWeeklyBackup(){
+  const last=parseInt(localStorage.getItem('almajal_last_weekly_backup')||'0');
+  const now=Date.now();
+  const ONE_WEEK=7*24*60*60*1000;
+  if(now-last>ONE_WEEK){
+    // أسبوع مضى بدون نسخة — نذكر المستخدم
+    setTimeout(()=>{
+      showToast('⚠️ حان وقت النسخة الاحتياطية الأسبوعية — سيتم التنزيل تلقائياً','#f59e0b');
+      setTimeout(autoBackupJSON, 3000);
+    }, 5000);
+  }
+}
+
+function startAutoFirebaseSync(){
+  // حفظ في Firebase كل 30 دقيقة
+  setInterval(()=>{
+    if(window._fbSave && window._fbSave.toString().includes('PATCH')){
+      window._fbSave();
+      localStorage.setItem('almajal_last_firebase_sync', Date.now().toString());
+      const t=new Date().toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'});
+      showToast('☁️ تم الحفظ التلقائي على السحابة — '+t,'#6366f1');
+      console.log('✅ حفظ تلقائي Firebase —', t);
+    }
+  }, 30*60*1000);
+}
+
+// تشغيل النسخ الاحتياطي بعد تحميل البيانات
+setTimeout(()=>{
+  checkWeeklyBackup();
+  startAutoFirebaseSync();
+}, 3000);
+
+/* ═══════════════════════════════════
    COMPUTED
 ═══════════════════════════════════ */
 function lineSpentAll(){
@@ -505,6 +553,53 @@ function projTotals(){
 }
 
 // Get all budget alerts
+
+function getContractAlerts(){
+  const alerts=[];
+  const now=new Date();
+  now.setHours(0,0,0,0);
+  (DB.contracts||[]).forEach(c=>{
+    // Check unpaid payments
+    (c.payments||[]).forEach((p,pi)=>{
+      if(p.status==='paid') return;
+      const due=new Date(p.dueDate);
+      due.setHours(0,0,0,0);
+      const days=Math.ceil((due-now)/86400000);
+      if(days>7||days<-30) return;
+      const overdue=days<0;
+      alerts.push({
+        type: overdue?'overdue':'upcoming',
+        tenant: c.tenant||'—',
+        contractNo: c.contractNo||'—',
+        label: 'دفعة '+(pi+1)+' من عقد '+c.contractNo,
+        dueDate: p.dueDate,
+        amount: p.amount||0,
+        days: days,
+        overdue: overdue
+      });
+    });
+    // Check contract end date (renewal alert)
+    if(c.endDate){
+      const end=new Date(c.endDate);
+      end.setHours(0,0,0,0);
+      const days=Math.ceil((end-now)/86400000);
+      if(days>=0&&days<=7){
+        alerts.push({
+          type:'renewal',
+          tenant: c.tenant||'—',
+          contractNo: c.contractNo||'—',
+          label: 'انتهاء عقد '+c.contractNo+' — '+c.tenant,
+          dueDate: c.endDate,
+          amount: 0,
+          days: days,
+          overdue: false
+        });
+      }
+    }
+  });
+  return alerts;
+}
+
 function getBudgetAlerts(){
   const ls=lineSpentAll();
   const alerts=[];
@@ -574,7 +669,8 @@ function renderHeader(){
   const totAp=pt.reduce((s,p)=>s+p.approved,0);
   const totSp=pt.reduce((s,p)=>s+p.spent,0);
   const alerts=getBudgetAlerts();
-  const alertCount=alerts.length;
+  const contractAlerts=getContractAlerts();
+  const alertCount=alerts.length+contractAlerts.length;
   // Logo
   if(DB.logo){
     document.getElementById('logo-box').innerHTML=`<img src="${DB.logo}" class="logo-img">`;
@@ -1417,12 +1513,40 @@ function dashHTML(){
 /* ── ALERTS TAB ── */
 function alertsHTML(){
   const alerts=getBudgetAlerts();
-  if(alerts.length===0) return `
+  const contractAlerts=getContractAlerts();
+  
+  // Contract alerts section
+  const contractSection=contractAlerts.length===0?'':`
+    <div style="margin-bottom:20px;">
+      <div style="font-weight:700;font-size:13px;color:#6366f1;margin-bottom:12px;display:flex;align-items:center;gap:8px;">🔔 تنبيهات العقود والدفعات (${contractAlerts.length})</div>
+      ${contractAlerts.map(a=>{
+        const col=a.overdue?'#f43f5e':a.type==='renewal'?'#8b5cf6':'#f59e0b';
+        const icon=a.overdue?'🔴':a.type==='renewal'?'🔄':'⏰';
+        const dayTxt=a.days<0?'متأخر '+Math.abs(a.days)+' يوم':a.days===0?'اليوم !!':'بعد '+a.days+' يوم';
+        return \`<div class="card" style="margin-bottom:10px;border-color:\${col}33;border-right:4px solid \${col};">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-size:11px;color:var(--text3);margin-bottom:3px;">\${icon} \${a.label}</div>
+              <div style="font-weight:700;font-size:13px;">📅 \${a.dueDate}</div>
+              \${a.amount>0?'<div style="font-size:12px;color:var(--text3);margin-top:2px;">المبلغ: <strong style="color:#10b981;">'+fmt(a.amount)+' '+SAR+'</strong></div>':''}
+            </div>
+            <span style="background:\${col}18;color:\${col};border:1px solid \${col}33;border-radius:50px;padding:4px 12px;font-size:12px;font-weight:700;">\${dayTxt}</span>
+          </div>
+        </div>\`;
+      }).join('')}
+    </div>`;
+
+  if(alerts.length===0 && contractAlerts.length===0) return \`
     <div style="text-align:center;padding:60px 20px;">
       <div style="font-size:48px;margin-bottom:16px;">✅</div>
-      <div style="font-weight:700;font-size:16px;color:#34d399;margin-bottom:8px;">كل البنود في المعدل الطبيعي</div>
-      <div style="font-size:13px;color:var(--text4);">لا توجد بنود تجاوزت ${WARN_PCT}% من ميزانيتها</div>
-    </div>`;
+      <div style="font-weight:700;font-size:16px;color:#34d399;margin-bottom:8px;">كل شيء تمام</div>
+      <div style="font-size:13px;color:var(--text4);">لا توجد تنبيهات ميزانية أو عقود قادمة</div>
+    </div>\`;
+  
+  if(alerts.length===0) return \`
+    <div style="padding:20px;">
+      \${contractSection}
+    </div>\`;
 
   const danger=alerts.filter(a=>a.type==='danger');
   const warn=alerts.filter(a=>a.type==='warn');
@@ -1456,6 +1580,7 @@ function alertsHTML(){
   <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:14px 16px;margin-bottom:20px;font-size:12px;color:var(--text3);">
     🟡 تنبيه عند ${WARN_PCT}% &nbsp;|&nbsp; 🔴 خطر عند ${DANGER_PCT}% &nbsp;|&nbsp; يمكن تعديل الحدود من الإعدادات
   </div>
+  ${contractSection.length>20?contractSection+'<div style="margin:16px 0;border-top:1px solid rgba(255,255,255,0.06);"></div>':''}
   ${renderGroup(danger,'بنود تجاوزت '+DANGER_PCT+'%','#f43f5e','🚨')}
   ${danger.length>0&&warn.length>0?'<div style="margin:16px 0;border-top:1px solid rgba(255,255,255,0.06);"></div>':''}
   ${renderGroup(warn,'بنود تجاوزت '+WARN_PCT+'%','#f59e0b','⚠️')}`;
@@ -1992,13 +2117,7 @@ function exportClaimsExcel(){
     const line=DB.lines.find(l=>l.id===c.budgetLineId)||{category:'—'};
     rows.push([monthName,c.date||'',c.supplier||'',c.invoiceNo||'',proj.name,line.category,c.amount||0,c.status==='paid'?'مدفوع':'معلق',c.notes||'']);
   });
-  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='مطالبات_الموردين_'+today()+'.csv';
-  a.click();
-  showToast('✅ تم تصدير Excel','#10b981');
+  exportExcel(rows, 'الموردين', 'مطالبات_الموردين_'+today()+'.xlsx');
 }
 
 function printClaimsReport(){
@@ -2625,6 +2744,21 @@ function printVehicleReport(plateOrId){
   const win=window.open('','_blank');
   win.document.write(html);
   win.document.close();
+}
+
+// ===== دالة تصدير Excel حقيقي =====
+function exportExcel(rows, sheetName, fileName){
+  if(typeof XLSX==='undefined'){ showToast('جاري تحميل مكتبة Excel...','#6366f1'); return; }
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  // تنسيق عرض الأعمدة تلقائياً
+  const colWidths = rows[0].map((_,ci)=>({
+    wch: Math.max(...rows.map(r=>String(r[ci]||'').length), 10)
+  }));
+  ws['!cols'] = colWidths;
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName||'البيانات');
+  XLSX.writeFile(wb, fileName||'تصدير.xlsx');
+  showToast('✅ تم تصدير ملف Excel','#10b981');
 }
 
 function downloadVehicleTemplate(){
@@ -3684,6 +3818,8 @@ function invoicesHTML(){
       <button onclick="openModal('printInvoicesReport')" class="btn btn-ghost btn-pill btn-sm">🖨 طباعة PDF</button>
       <button onclick="importInvoicesExcel()" class="btn btn-ghost btn-pill btn-sm">⬆ استيراد Excel</button>
       <input type="file" id="inv-excel-input" accept=".xlsx,.xls,.csv" style="display:none;" onchange="handleInvoiceImport(this)">
+      <button id="btn-excel-selected" onclick="exportSelectedInvoicesExcel()" class="btn btn-pill btn-sm" style="display:none;background:linear-gradient(135deg,#10b981,#059669);color:white;">⬇ Excel المحدد (<span id="selected-count-xl">0</span>)</button>
+      <button id="btn-print-selected" onclick="printSelectedInvoices()" class="btn btn-pill btn-sm" style="display:none;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;">🖨 طباعة المحدد (<span id="selected-count">0</span>)</button>
       <button onclick="openModal('addInvoiceRow')" class="btn btn-gold btn-pill btn-sm">+ فاتورة جديدة</button>
     </div>
   </div>
@@ -3774,6 +3910,7 @@ function invoicesHTML(){
 
     <table class="tbl">
       <thead><tr>
+        <th style="width:32px;text-align:center;"><input type="checkbox" id="inv-check-all" onclick="toggleAllInvChecks(this)" title="تحديد الكل" style="cursor:pointer;width:15px;height:15px;"></th>
         <th>رقم الفاتورة</th><th>المورد</th><th>وصف الخدمة</th><th>رقم السيارة</th>
         <th>المشروع</th><th>البند</th><th>التاريخ</th>
         <th>القيمة</th><th>الضريبة</th><th>الإجمالي</th><th></th>
@@ -3827,6 +3964,7 @@ function renderInvTable(){
     const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
     const realIdx=(DB.invoices||[]).indexOf(inv);
     return '<tr>'+
+      '<td style="text-align:center;"><input type="checkbox" class="inv-check" data-id="'+inv.id+'" onclick="updatePrintSelectedBtn()" style="width:15px;height:15px;cursor:pointer;"></td>'+
       '<td style="font-weight:600;">'+(inv.invoiceNo||'—')+'</td>'+
       '<td>'+(inv.supplier||'—')+'</td>'+
       '<td style="color:var(--text3);">'+(inv.desc||'—')+'</td>'+
@@ -3844,6 +3982,143 @@ function renderInvTable(){
       '</td>'+
     '</tr>';
   }).join('');
+}
+
+function toggleAllInvChecks(cb){
+  document.querySelectorAll('.inv-check').forEach(c=>c.checked=cb.checked);
+  updatePrintSelectedBtn();
+}
+
+function updatePrintSelectedBtn(){
+  const checked=document.querySelectorAll('.inv-check:checked');
+  const btn=document.getElementById('btn-print-selected');
+  const btnXl=document.getElementById('btn-excel-selected');
+  const countEl=document.getElementById('selected-count');
+  const countElXl=document.getElementById('selected-count-xl');
+  if(btn){ btn.style.display=checked.length?'':'none'; }
+  if(btnXl){ btnXl.style.display=checked.length?'':'none'; }
+  if(countEl){ countEl.textContent=checked.length; }
+  if(countElXl){ countElXl.textContent=checked.length; }
+  // reset "select all" checkbox state
+  const allCbs=document.querySelectorAll('.inv-check');
+  const allChk=document.getElementById('inv-check-all');
+  if(allChk && allCbs.length){
+    allChk.indeterminate=checked.length>0&&checked.length<allCbs.length;
+    allChk.checked=checked.length===allCbs.length;
+  }
+}
+
+function exportSelectedInvoicesExcel(){
+  const ids=[...document.querySelectorAll('.inv-check:checked')].map(c=>c.dataset.id);
+  if(!ids.length) return showToast('اختار فواتير أولاً','#f43f5e');
+  const selectedInvs=ids.map(id=>(DB.invoices||[]).find(i=>i.id===id)).filter(Boolean);
+  const rows=[['رقم الفاتورة','المورد','وصف الخدمة','رقم السيارة','المشروع','البند','التاريخ','القيمة','الضريبة','الإجمالي']];
+  selectedInvs.forEach(inv=>{
+    const proj=DB.projects.find(p=>p.id===inv.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
+    rows.push([inv.invoiceNo||'',inv.supplier||'',inv.desc||'',inv.vehicleNo||'',proj.name,line.category,inv.date||'',inv.amount||0,inv.tax||0,inv.total||0]);
+  });
+  // Add totals row
+  const totalAmt=selectedInvs.reduce((s,i)=>s+(i.amount||0),0);
+  const totalTax=selectedInvs.reduce((s,i)=>s+(i.tax||0),0);
+  const totalAll=selectedInvs.reduce((s,i)=>s+(i.total||0),0);
+  rows.push(['','','','','','','الإجمالي',totalAmt,totalTax,totalAll]);
+  exportExcel(rows,'الفواتير المحددة','فواتير_محددة_'+today()+'.xlsx');
+}
+
+function printSelectedInvoices(){
+  const ids=[...document.querySelectorAll('.inv-check:checked')].map(c=>c.dataset.id);
+  if(!ids.length) return showToast('اختار فواتير أولاً','#f43f5e');
+  const selectedInvs=ids.map(id=>(DB.invoices||[]).find(i=>i.id===id)).filter(Boolean);
+  const companyName=DB.companyName||COMPANY;
+  
+  const invoicePages=selectedInvs.map((inv,idx)=>{
+    const proj=DB.projects.find(p=>p.id===inv.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
+    const pageBreak=idx<selectedInvs.length-1?'page-break-after:always;':'';
+    return \`<div style="border:2px solid #1a5276;border-radius:10px;padding:28px;margin-bottom:20px;background:#fff;\${pageBreak}">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1a5276;padding-bottom:14px;margin-bottom:18px;">
+        <div>
+          <div style="font-size:18px;font-weight:900;color:#1a5276;">\${companyName}</div>
+          <div style="font-size:11px;color:#888;">نظام إدارة تكاليف المشاريع</div>
+        </div>
+        <div style="text-align:left;">
+          <div style="font-size:15px;font-weight:800;color:#b8892a;">🧾 فاتورة</div>
+          <div style="font-size:12px;color:#555;">رقم: \${inv.invoiceNo||'—'}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div style="background:#f8f9fa;border-radius:8px;padding:10px;">
+          <div style="font-size:10px;color:#888;">المورد</div>
+          <div style="font-weight:700;">\${inv.supplier||'—'}</div>
+        </div>
+        <div style="background:#f8f9fa;border-radius:8px;padding:10px;">
+          <div style="font-size:10px;color:#888;">المشروع</div>
+          <div style="font-weight:700;">\${proj.name}</div>
+        </div>
+        <div style="background:#f8f9fa;border-radius:8px;padding:10px;">
+          <div style="font-size:10px;color:#888;">البند</div>
+          <div style="font-weight:700;">\${line.category}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div style="background:#f8f9fa;border-radius:8px;padding:10px;">
+          <div style="font-size:10px;color:#888;">وصف الخدمة</div>
+          <div style="font-weight:600;">\${inv.desc||'—'}</div>
+        </div>
+        <div style="background:#f8f9fa;border-radius:8px;padding:10px;">
+          <div style="font-size:10px;color:#888;">التاريخ</div>
+          <div style="font-weight:600;">\${inv.date||'—'}\${inv.vehicleNo?' | '+inv.vehicleNo:''}</div>
+        </div>
+      </div>
+      <div style="background:linear-gradient(135deg,#1a5276,#0f3460);color:white;border-radius:10px;padding:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center;">
+        <div><div style="font-size:10px;color:#a0c0e0;">بدون ضريبة</div><div style="font-size:18px;font-weight:800;">\${fmt(inv.amount||0)} ر.س</div></div>
+        <div><div style="font-size:10px;color:#a0c0e0;">ضريبة 15%</div><div style="font-size:18px;font-weight:800;color:#f59e0b;">\${fmt(inv.tax||0)} ر.س</div></div>
+        <div><div style="font-size:10px;color:#a0c0e0;">الإجمالي</div><div style="font-size:18px;font-weight:800;color:#f0c866;">\${fmt(inv.total||0)} ر.س</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:28px;padding-top:14px;border-top:1px solid #ddd;text-align:center;">
+        <div><div style="height:40px;"></div><div style="border-top:1px solid #999;padding-top:6px;font-size:12px;font-weight:700;">توقيع المورد</div></div>
+        <div><div style="height:40px;"></div><div style="border-top:1px solid #999;padding-top:6px;font-size:12px;font-weight:700;">محاسب المشاريع</div></div>
+      </div>
+    </div>\`;
+  }).join('');
+
+  const totalAll=selectedInvs.reduce((s,i)=>s+(i.total||0),0);
+  const totalAmt=selectedInvs.reduce((s,i)=>s+(i.amount||0),0);
+  const totalTax=selectedInvs.reduce((s,i)=>s+(i.tax||0),0);
+
+  const win=window.open('','_blank');
+  win.document.write(\`<!DOCTYPE html><html dir="rtl" lang="ar"><head>
+    <meta charset="UTF-8">
+    <title>طباعة الفواتير المحددة</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
+      *{margin:0;padding:0;box-sizing:border-box;}
+      body{font-family:'Cairo',sans-serif;background:#f0f0f0;padding:20px;direction:rtl;}
+      .summary-bar{background:#1a5276;color:white;border-radius:10px;padding:14px 20px;display:flex;justify-content:space-around;margin-bottom:20px;text-align:center;}
+      .summary-bar div div:first-child{font-size:11px;color:#a0c0e0;}
+      .summary-bar div div:last-child{font-size:16px;font-weight:800;}
+      @media print{
+        body{background:white;padding:5px;}
+        .no-print{display:none!important;}
+        .summary-bar{margin-bottom:14px;}
+      }
+    </style>
+  </head><body>
+    <div class="no-print" style="text-align:center;margin-bottom:16px;">
+      <button onclick="window.print()" style="background:#1a5276;color:white;border:none;padding:10px 28px;border-radius:8px;font-family:Cairo,sans-serif;font-size:14px;font-weight:700;cursor:pointer;">🖨 طباعة</button>
+      <button onclick="window.close()" style="background:#666;color:white;border:none;padding:10px 20px;border-radius:8px;font-family:Cairo,sans-serif;font-size:14px;cursor:pointer;margin-right:10px;">✕ إغلاق</button>
+    </div>
+    <div class="summary-bar">
+      <div><div>عدد الفواتير</div><div>\${selectedInvs.length} فاتورة</div></div>
+      <div><div>بدون ضريبة</div><div>\${fmt(totalAmt)} ر.س</div></div>
+      <div><div>الضريبة</div><div style="color:#f59e0b;">\${fmt(totalTax)} ر.س</div></div>
+      <div><div>الإجمالي الكلي</div><div style="color:#f0c866;">\${fmt(totalAll)} ر.س</div></div>
+    </div>
+    \${invoicePages}
+  </body></html>\`);
+  win.document.close();
+  win.focus();
 }
 
 function updateEditInvLines(projId){
@@ -6203,13 +6478,7 @@ function exportInvoicesReportExcel(){
   const totalAll=invs.reduce((s,i)=>s+(i.total||0),0);
   rows.push(['','','','','','','الإجمالي',totalAmt,totalTax,totalAll]);
 
-  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
-  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='كشف_فواتير_'+proj.name+'_'+monthName+'_'+year+'.csv';
-  a.click();
-  showToast('✅ تم تصدير Excel','#10b981');
+  exportExcel(rows, 'الفواتير', 'كشف_فواتير_'+proj.name+'_'+monthName+'_'+year+'.xlsx');
 }
 
 
@@ -6481,13 +6750,7 @@ function exportDeductExcel(){
     const line=DB.lines.find(l=>l.id===e.lineId)||{category:'—'};
     rows.push([e.refNum||'',proj.name,line.category,e.amount||0,e.date||'',e.sendDate||'',e.sendRef||'',e.custodyMonth||'',e.custodyType||'',e.deductStatus||'',e.location||'']);
   });
-  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
-  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='كشوف_التخفيض_'+today()+'.csv';
-  a.click();
-  showToast('✅ تم التصدير','#10b981');
+  exportExcel(rows, 'كشوف التخفيض', 'كشوف_التخفيض_'+today()+'.xlsx');
 }
 
 function deleteDeductStatement(id){
