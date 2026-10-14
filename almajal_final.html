@@ -1516,37 +1516,29 @@ function alertsHTML(){
   const contractAlerts=getContractAlerts();
   
   // Contract alerts section
-  const contractSection=contractAlerts.length===0?'':`
-    <div style="margin-bottom:20px;">
-      <div style="font-weight:700;font-size:13px;color:#6366f1;margin-bottom:12px;display:flex;align-items:center;gap:8px;">🔔 تنبيهات العقود والدفعات (${contractAlerts.length})</div>
-      ${contractAlerts.map(a=>{
+  const contractSection=contractAlerts.length===0?'':
+    '<div style="margin-bottom:20px;">'+
+      '<div style="font-weight:700;font-size:13px;color:#6366f1;margin-bottom:12px;display:flex;align-items:center;gap:8px;">🔔 تنبيهات العقود والدفعات ('+contractAlerts.length+')</div>'+
+      contractAlerts.map(a=>{
         const col=a.overdue?'#f43f5e':a.type==='renewal'?'#8b5cf6':'#f59e0b';
         const icon=a.overdue?'🔴':a.type==='renewal'?'🔄':'⏰';
         const dayTxt=a.days<0?'متأخر '+Math.abs(a.days)+' يوم':a.days===0?'اليوم !!':'بعد '+a.days+' يوم';
-        return \`<div class="card" style="margin-bottom:10px;border-color:\${col}33;border-right:4px solid \${col};">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <div>
-              <div style="font-size:11px;color:var(--text3);margin-bottom:3px;">\${icon} \${a.label}</div>
-              <div style="font-weight:700;font-size:13px;">📅 \${a.dueDate}</div>
-              \${a.amount>0?'<div style="font-size:12px;color:var(--text3);margin-top:2px;">المبلغ: <strong style="color:#10b981;">'+fmt(a.amount)+' '+SAR+'</strong></div>':''}
-            </div>
-            <span style="background:\${col}18;color:\${col};border:1px solid \${col}33;border-radius:50px;padding:4px 12px;font-size:12px;font-weight:700;">\${dayTxt}</span>
-          </div>
-        </div>\`;
-      }).join('')}
-    </div>`;
+        return '<div class="card" style="margin-bottom:10px;border-color:'+col+'33;border-right:4px solid '+col+';padding:12px;">'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+            '<div>'+
+              '<div style="font-size:11px;color:var(--text3);margin-bottom:3px;">'+icon+' '+a.label+'</div>'+
+              '<div style="font-weight:700;font-size:13px;">📅 '+a.dueDate+'</div>'+
+              (a.amount>0?'<div style="font-size:12px;color:var(--text3);margin-top:2px;">المبلغ: <strong style="color:#10b981;">'+fmt(a.amount)+' '+SAR+'</strong></div>':'')+
+            '</div>'+
+            '<span style="background:'+col+'18;color:'+col+';border:1px solid '+col+'33;border-radius:50px;padding:4px 12px;font-size:12px;font-weight:700;">'+dayTxt+'</span>'+
+          '</div>'+
+        '</div>';
+      }).join('')+
+    '</div>';
 
-  if(alerts.length===0 && contractAlerts.length===0) return \`
-    <div style="text-align:center;padding:60px 20px;">
-      <div style="font-size:48px;margin-bottom:16px;">✅</div>
-      <div style="font-weight:700;font-size:16px;color:#34d399;margin-bottom:8px;">كل شيء تمام</div>
-      <div style="font-size:13px;color:var(--text4);">لا توجد تنبيهات ميزانية أو عقود قادمة</div>
-    </div>\`;
+  if(alerts.length===0 && contractAlerts.length===0) return '<div style="text-align:center;padding:60px 20px;"><div style="font-size:48px;margin-bottom:16px;">✅</div><div style="font-weight:700;font-size:16px;color:#34d399;margin-bottom:8px;">كل شيء تمام</div><div style="font-size:13px;color:var(--text4);">لا توجد تنبيهات ميزانية أو عقود قادمة</div></div>';
   
-  if(alerts.length===0) return \`
-    <div style="padding:20px;">
-      \${contractSection}
-    </div>\`;
+  if(alerts.length===0) return '<div style="padding:20px;">'+contractSection+'</div>';
 
   const danger=alerts.filter(a=>a.type==='danger');
   const warn=alerts.filter(a=>a.type==='warn');
@@ -4036,51 +4028,36 @@ function printSelectedInvoices(){
     const proj=DB.projects.find(p=>p.id===inv.projectId)||{name:'—'};
     const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
     const pageBreak=idx<selectedInvs.length-1?'page-break-after:always;':'';
-    return \`<div style="border:2px solid #1a5276;border-radius:10px;padding:28px;margin-bottom:20px;background:#fff;\${pageBreak}">
-      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1a5276;padding-bottom:14px;margin-bottom:18px;">
-        <div>
-          <div style="font-size:18px;font-weight:900;color:#1a5276;">\${companyName}</div>
-          <div style="font-size:11px;color:#888;">نظام إدارة تكاليف المشاريع</div>
-        </div>
-        <div style="text-align:left;">
-          <div style="font-size:15px;font-weight:800;color:#b8892a;">🧾 فاتورة</div>
-          <div style="font-size:12px;color:#555;">رقم: \${inv.invoiceNo||'—'}</div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;">
-        <div style="background:#f8f9fa;border-radius:8px;padding:10px;">
-          <div style="font-size:10px;color:#888;">المورد</div>
-          <div style="font-weight:700;">\${inv.supplier||'—'}</div>
-        </div>
-        <div style="background:#f8f9fa;border-radius:8px;padding:10px;">
-          <div style="font-size:10px;color:#888;">المشروع</div>
-          <div style="font-weight:700;">\${proj.name}</div>
-        </div>
-        <div style="background:#f8f9fa;border-radius:8px;padding:10px;">
-          <div style="font-size:10px;color:#888;">البند</div>
-          <div style="font-weight:700;">\${line.category}</div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
-        <div style="background:#f8f9fa;border-radius:8px;padding:10px;">
-          <div style="font-size:10px;color:#888;">وصف الخدمة</div>
-          <div style="font-weight:600;">\${inv.desc||'—'}</div>
-        </div>
-        <div style="background:#f8f9fa;border-radius:8px;padding:10px;">
-          <div style="font-size:10px;color:#888;">التاريخ</div>
-          <div style="font-weight:600;">\${inv.date||'—'}\${inv.vehicleNo?' | '+inv.vehicleNo:''}</div>
-        </div>
-      </div>
-      <div style="background:linear-gradient(135deg,#1a5276,#0f3460);color:white;border-radius:10px;padding:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center;">
-        <div><div style="font-size:10px;color:#a0c0e0;">بدون ضريبة</div><div style="font-size:18px;font-weight:800;">\${fmt(inv.amount||0)} ر.س</div></div>
-        <div><div style="font-size:10px;color:#a0c0e0;">ضريبة 15%</div><div style="font-size:18px;font-weight:800;color:#f59e0b;">\${fmt(inv.tax||0)} ر.س</div></div>
-        <div><div style="font-size:10px;color:#a0c0e0;">الإجمالي</div><div style="font-size:18px;font-weight:800;color:#f0c866;">\${fmt(inv.total||0)} ر.س</div></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:28px;padding-top:14px;border-top:1px solid #ddd;text-align:center;">
-        <div><div style="height:40px;"></div><div style="border-top:1px solid #999;padding-top:6px;font-size:12px;font-weight:700;">توقيع المورد</div></div>
-        <div><div style="height:40px;"></div><div style="border-top:1px solid #999;padding-top:6px;font-size:12px;font-weight:700;">محاسب المشاريع</div></div>
-      </div>
-    </div>\`;
+    return '<div style="border:2px solid #1a5276;border-radius:10px;padding:28px;margin-bottom:20px;background:#fff;'+pageBreak+'">'+ 
+      '<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1a5276;padding-bottom:14px;margin-bottom:18px;">'+
+        '<div>'+
+          '<div style="font-size:18px;font-weight:900;color:#1a5276;">'+companyName+'</div>'+
+          '<div style="font-size:11px;color:#888;">نظام إدارة تكاليف المشاريع</div>'+
+        '</div>'+
+        '<div style="text-align:left;">'+
+          '<div style="font-size:15px;font-weight:800;color:#b8892a;">🧾 فاتورة</div>'+
+          '<div style="font-size:12px;color:#555;">رقم: '+(inv.invoiceNo||'—')+'</div>'+
+        '</div>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;">'+
+        '<div style="background:#f8f9fa;border-radius:8px;padding:10px;"><div style="font-size:10px;color:#888;">المورد</div><div style="font-weight:700;">'+(inv.supplier||'—')+'</div></div>'+
+        '<div style="background:#f8f9fa;border-radius:8px;padding:10px;"><div style="font-size:10px;color:#888;">المشروع</div><div style="font-weight:700;">'+proj.name+'</div></div>'+
+        '<div style="background:#f8f9fa;border-radius:8px;padding:10px;"><div style="font-size:10px;color:#888;">البند</div><div style="font-weight:700;">'+line.category+'</div></div>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">'+
+        '<div style="background:#f8f9fa;border-radius:8px;padding:10px;"><div style="font-size:10px;color:#888;">وصف الخدمة</div><div style="font-weight:600;">'+(inv.desc||'—')+'</div></div>'+
+        '<div style="background:#f8f9fa;border-radius:8px;padding:10px;"><div style="font-size:10px;color:#888;">التاريخ</div><div style="font-weight:600;">'+(inv.date||'—')+(inv.vehicleNo?' | '+inv.vehicleNo:'')+'</div></div>'+
+      '</div>'+
+      '<div style="background:linear-gradient(135deg,#1a5276,#0f3460);color:white;border-radius:10px;padding:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center;">'+
+        '<div><div style="font-size:10px;color:#a0c0e0;">بدون ضريبة</div><div style="font-size:18px;font-weight:800;">'+fmt(inv.amount||0)+' ر.س</div></div>'+
+        '<div><div style="font-size:10px;color:#a0c0e0;">ضريبة 15%</div><div style="font-size:18px;font-weight:800;color:#f59e0b;">'+fmt(inv.tax||0)+' ر.س</div></div>'+
+        '<div><div style="font-size:10px;color:#a0c0e0;">الإجمالي</div><div style="font-size:18px;font-weight:800;color:#f0c866;">'+fmt(inv.total||0)+' ر.س</div></div>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:28px;padding-top:14px;border-top:1px solid #ddd;text-align:center;">'+
+        '<div><div style="height:40px;"></div><div style="border-top:1px solid #999;padding-top:6px;font-size:12px;font-weight:700;">توقيع المورد</div></div>'+
+        '<div><div style="height:40px;"></div><div style="border-top:1px solid #999;padding-top:6px;font-size:12px;font-weight:700;">محاسب المشاريع</div></div>'+
+      '</div>'+
+    '</div>';
   }).join('');
 
   const totalAll=selectedInvs.reduce((s,i)=>s+(i.total||0),0);
@@ -4088,35 +4065,31 @@ function printSelectedInvoices(){
   const totalTax=selectedInvs.reduce((s,i)=>s+(i.tax||0),0);
 
   const win=window.open('','_blank');
-  win.document.write(\`<!DOCTYPE html><html dir="rtl" lang="ar"><head>
-    <meta charset="UTF-8">
-    <title>طباعة الفواتير المحددة</title>
-    <style>
-      @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
-      *{margin:0;padding:0;box-sizing:border-box;}
-      body{font-family:'Cairo',sans-serif;background:#f0f0f0;padding:20px;direction:rtl;}
-      .summary-bar{background:#1a5276;color:white;border-radius:10px;padding:14px 20px;display:flex;justify-content:space-around;margin-bottom:20px;text-align:center;}
-      .summary-bar div div:first-child{font-size:11px;color:#a0c0e0;}
-      .summary-bar div div:last-child{font-size:16px;font-weight:800;}
-      @media print{
-        body{background:white;padding:5px;}
-        .no-print{display:none!important;}
-        .summary-bar{margin-bottom:14px;}
-      }
-    </style>
-  </head><body>
-    <div class="no-print" style="text-align:center;margin-bottom:16px;">
-      <button onclick="window.print()" style="background:#1a5276;color:white;border:none;padding:10px 28px;border-radius:8px;font-family:Cairo,sans-serif;font-size:14px;font-weight:700;cursor:pointer;">🖨 طباعة</button>
-      <button onclick="window.close()" style="background:#666;color:white;border:none;padding:10px 20px;border-radius:8px;font-family:Cairo,sans-serif;font-size:14px;cursor:pointer;margin-right:10px;">✕ إغلاق</button>
-    </div>
-    <div class="summary-bar">
-      <div><div>عدد الفواتير</div><div>\${selectedInvs.length} فاتورة</div></div>
-      <div><div>بدون ضريبة</div><div>\${fmt(totalAmt)} ر.س</div></div>
-      <div><div>الضريبة</div><div style="color:#f59e0b;">\${fmt(totalTax)} ر.س</div></div>
-      <div><div>الإجمالي الكلي</div><div style="color:#f0c866;">\${fmt(totalAll)} ر.س</div></div>
-    </div>
-    \${invoicePages}
-  </body></html>\`);
+  const htmlContent='<!DOCTYPE html><html dir="rtl" lang="ar"><head>'+
+    '<meta charset="UTF-8">'+
+    '<title>طباعة الفواتير المحددة</title>'+
+    '<style>'+
+    '@import url(\'https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap\');'+
+    '*{margin:0;padding:0;box-sizing:border-box;}'+
+    'body{font-family:\'Cairo\',sans-serif;background:#f0f0f0;padding:20px;direction:rtl;}'+
+    '.summary-bar{background:#1a5276;color:white;border-radius:10px;padding:14px 20px;display:flex;justify-content:space-around;margin-bottom:20px;text-align:center;}'+
+    '.summary-bar div div:first-child{font-size:11px;color:#a0c0e0;}'+
+    '.summary-bar div div:last-child{font-size:16px;font-weight:800;}'+
+    '@media print{body{background:white;padding:5px;}.no-print{display:none!important;}.summary-bar{margin-bottom:14px;}}'+
+    '</style></head><body>'+
+    '<div class="no-print" style="text-align:center;margin-bottom:16px;">'+
+      '<button onclick="window.print()" style="background:#1a5276;color:white;border:none;padding:10px 28px;border-radius:8px;font-family:Cairo,sans-serif;font-size:14px;font-weight:700;cursor:pointer;">🖨 طباعة</button>'+
+      '<button onclick="window.close()" style="background:#666;color:white;border:none;padding:10px 20px;border-radius:8px;font-family:Cairo,sans-serif;font-size:14px;cursor:pointer;margin-right:10px;">✕ إغلاق</button>'+
+    '</div>'+
+    '<div class="summary-bar">'+
+      '<div><div>عدد الفواتير</div><div>'+selectedInvs.length+' فاتورة</div></div>'+
+      '<div><div>بدون ضريبة</div><div>'+fmt(totalAmt)+' ر.س</div></div>'+
+      '<div><div>الضريبة</div><div style="color:#f59e0b;">'+fmt(totalTax)+' ر.س</div></div>'+
+      '<div><div>الإجمالي الكلي</div><div style="color:#f0c866;">'+fmt(totalAll)+' ر.س</div></div>'+
+    '</div>'+
+    invoicePages+
+  '</body></html>';
+  win.document.write(htmlContent);
   win.document.close();
   win.focus();
 }
