@@ -653,6 +653,7 @@ let detailProject=null;
 let reportFilter={year:new Date().getFullYear(),month:new Date().getMonth()+1,projectId:'all'};
 let globalSearch='';
 let tempInvoices=[];
+let selectedInvIds=new Set();
 
 /* ═══════════════════════════════════
    RENDER
@@ -3956,7 +3957,7 @@ function renderInvTable(){
     const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
     const realIdx=(DB.invoices||[]).indexOf(inv);
     return '<tr>'+
-      '<td style="text-align:center;"><input type="checkbox" class="inv-check" data-id="'+inv.id+'" onclick="updatePrintSelectedBtn()" style="width:15px;height:15px;cursor:pointer;"></td>'+
+      '<td style="text-align:center;"><input type="checkbox" class="inv-check" data-id="'+inv.id+'" '+(selectedInvIds.has(inv.id)?'checked':'')+' onclick="toggleInvCheck(this)" style="width:15px;height:15px;cursor:pointer;"></td>'+
       '<td style="font-weight:600;">'+(inv.invoiceNo||'—')+'</td>'+
       '<td>'+(inv.supplier||'—')+'</td>'+
       '<td style="color:var(--text3);">'+(inv.desc||'—')+'</td>'+
@@ -3976,32 +3977,43 @@ function renderInvTable(){
   }).join('');
 }
 
+function toggleInvCheck(cb){
+  const id=cb.dataset.id;
+  if(cb.checked) selectedInvIds.add(id);
+  else selectedInvIds.delete(id);
+  updatePrintSelectedBtn();
+}
+
 function toggleAllInvChecks(cb){
-  document.querySelectorAll('.inv-check').forEach(c=>c.checked=cb.checked);
+  document.querySelectorAll('.inv-check').forEach(c=>{
+    c.checked=cb.checked;
+    if(cb.checked) selectedInvIds.add(c.dataset.id);
+    else selectedInvIds.delete(c.dataset.id);
+  });
   updatePrintSelectedBtn();
 }
 
 function updatePrintSelectedBtn(){
-  const checked=document.querySelectorAll('.inv-check:checked');
+  const count=selectedInvIds.size;
   const btn=document.getElementById('btn-print-selected');
   const btnXl=document.getElementById('btn-excel-selected');
   const countEl=document.getElementById('selected-count');
   const countElXl=document.getElementById('selected-count-xl');
-  if(btn){ btn.style.display=checked.length?'':'none'; }
-  if(btnXl){ btnXl.style.display=checked.length?'':'none'; }
-  if(countEl){ countEl.textContent=checked.length; }
-  if(countElXl){ countElXl.textContent=checked.length; }
-  // reset "select all" checkbox state
+  if(btn){ btn.style.display=count?'':'none'; }
+  if(btnXl){ btnXl.style.display=count?'':'none'; }
+  if(countEl){ countEl.textContent=count; }
+  if(countElXl){ countElXl.textContent=count; }
   const allCbs=document.querySelectorAll('.inv-check');
   const allChk=document.getElementById('inv-check-all');
   if(allChk && allCbs.length){
-    allChk.indeterminate=checked.length>0&&checked.length<allCbs.length;
-    allChk.checked=checked.length===allCbs.length;
+    const checkedVisible=document.querySelectorAll('.inv-check:checked').length;
+    allChk.indeterminate=checkedVisible>0&&checkedVisible<allCbs.length;
+    allChk.checked=checkedVisible===allCbs.length&&allCbs.length>0;
   }
 }
 
 function exportSelectedInvoicesExcel(){
-  const ids=[...document.querySelectorAll('.inv-check:checked')].map(c=>c.dataset.id);
+  const ids=[...selectedInvIds];
   if(!ids.length) return showToast('اختار فواتير أولاً','#f43f5e');
   const selectedInvs=ids.map(id=>(DB.invoices||[]).find(i=>i.id===id)).filter(Boolean);
   const rows=[['رقم الفاتورة','المورد','وصف الخدمة','رقم السيارة','المشروع','البند','التاريخ','القيمة','الضريبة','الإجمالي']];
@@ -4019,7 +4031,7 @@ function exportSelectedInvoicesExcel(){
 }
 
 function printSelectedInvoices(){
-  const ids=[...document.querySelectorAll('.inv-check:checked')].map(c=>c.dataset.id);
+  const ids=[...selectedInvIds];
   if(!ids.length) return showToast('اختار فواتير أولاً','#f43f5e');
   const selectedInvs=ids.map(id=>(DB.invoices||[]).find(i=>i.id===id)).filter(Boolean);
   const companyName=DB.companyName||COMPANY;
