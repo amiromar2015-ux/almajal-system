@@ -4035,71 +4035,106 @@ function printSelectedInvoices(){
   if(!ids.length) return showToast('اختار فواتير أولاً','#f43f5e');
   const selectedInvs=ids.map(id=>(DB.invoices||[]).find(i=>i.id===id)).filter(Boolean);
   const companyName=DB.companyName||COMPANY;
-  
-  const invoicePages=selectedInvs.map((inv,idx)=>{
-    const proj=DB.projects.find(p=>p.id===inv.projectId)||{name:'—'};
-    const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
-    const pageBreak=idx<selectedInvs.length-1?'page-break-after:always;':'';
-    return '<div style="border:2px solid #1a5276;border-radius:10px;padding:28px;margin-bottom:20px;background:#fff;'+pageBreak+'">'+ 
-      '<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1a5276;padding-bottom:14px;margin-bottom:18px;">'+
-        '<div>'+
-          '<div style="font-size:18px;font-weight:900;color:#1a5276;">'+companyName+'</div>'+
-          '<div style="font-size:11px;color:#888;">نظام إدارة تكاليف المشاريع</div>'+
-        '</div>'+
-        '<div style="text-align:left;">'+
-          '<div style="font-size:15px;font-weight:800;color:#b8892a;">🧾 فاتورة</div>'+
-          '<div style="font-size:12px;color:#555;">رقم: '+(inv.invoiceNo||'—')+'</div>'+
-        '</div>'+
-      '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;">'+
-        '<div style="background:#f8f9fa;border-radius:8px;padding:10px;"><div style="font-size:10px;color:#888;">المورد</div><div style="font-weight:700;">'+(inv.supplier||'—')+'</div></div>'+
-        '<div style="background:#f8f9fa;border-radius:8px;padding:10px;"><div style="font-size:10px;color:#888;">المشروع</div><div style="font-weight:700;">'+proj.name+'</div></div>'+
-        '<div style="background:#f8f9fa;border-radius:8px;padding:10px;"><div style="font-size:10px;color:#888;">البند</div><div style="font-weight:700;">'+line.category+'</div></div>'+
-      '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">'+
-        '<div style="background:#f8f9fa;border-radius:8px;padding:10px;"><div style="font-size:10px;color:#888;">وصف الخدمة</div><div style="font-weight:600;">'+(inv.desc||'—')+'</div></div>'+
-        '<div style="background:#f8f9fa;border-radius:8px;padding:10px;"><div style="font-size:10px;color:#888;">التاريخ</div><div style="font-weight:600;">'+(inv.date||'—')+(inv.vehicleNo?' | '+inv.vehicleNo:'')+'</div></div>'+
-      '</div>'+
-      '<div style="background:linear-gradient(135deg,#1a5276,#0f3460);color:white;border-radius:10px;padding:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center;">'+
-        '<div><div style="font-size:10px;color:#a0c0e0;">بدون ضريبة</div><div style="font-size:18px;font-weight:800;">'+fmt(inv.amount||0)+' ر.س</div></div>'+
-        '<div><div style="font-size:10px;color:#a0c0e0;">ضريبة 15%</div><div style="font-size:18px;font-weight:800;color:#f59e0b;">'+fmt(inv.tax||0)+' ر.س</div></div>'+
-        '<div><div style="font-size:10px;color:#a0c0e0;">الإجمالي</div><div style="font-size:18px;font-weight:800;color:#f0c866;">'+fmt(inv.total||0)+' ر.س</div></div>'+
-      '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:28px;padding-top:14px;border-top:1px solid #ddd;text-align:center;">'+
-        '<div><div style="height:40px;"></div><div style="border-top:1px solid #999;padding-top:6px;font-size:12px;font-weight:700;">توقيع المورد</div></div>'+
-        '<div><div style="height:40px;"></div><div style="border-top:1px solid #999;padding-top:6px;font-size:12px;font-weight:700;">محاسب المشاريع</div></div>'+
-      '</div>'+
-    '</div>';
-  }).join('');
-
   const totalAll=selectedInvs.reduce((s,i)=>s+(i.total||0),0);
   const totalAmt=selectedInvs.reduce((s,i)=>s+(i.amount||0),0);
   const totalTax=selectedInvs.reduce((s,i)=>s+(i.tax||0),0);
 
+  const tableRows=selectedInvs.map((inv,idx)=>{
+    const proj=DB.projects.find(p=>p.id===inv.projectId)||{name:'—'};
+    const line=DB.lines.find(l=>l.id===inv.lineId)||{category:'—'};
+    return '<tr style="border-bottom:1px solid #e2e8f0;">'+
+      '<td style="padding:8px 10px;text-align:center;">'+(idx+1)+'</td>'+
+      '<td style="padding:8px 10px;">'+(inv.invoiceNo||'—')+'</td>'+
+      '<td style="padding:8px 10px;">'+(inv.supplier||'—')+'</td>'+
+      '<td style="padding:8px 10px;">'+(inv.desc||'—')+'</td>'+
+      '<td style="padding:8px 10px;text-align:center;">'+(inv.vehicleNo||'—')+'</td>'+
+      '<td style="padding:8px 10px;">'+proj.name+'</td>'+
+      '<td style="padding:8px 10px;">'+line.category+'</td>'+
+      '<td style="padding:8px 10px;text-align:center;">'+(inv.date||'—')+'</td>'+
+      '<td style="padding:8px 10px;text-align:left;">'+fmt(inv.amount||0)+'</td>'+
+      '<td style="padding:8px 10px;text-align:left;color:#b8892a;">'+fmt(inv.tax||0)+'</td>'+
+      '<td style="padding:8px 10px;text-align:left;font-weight:700;color:#1a5276;">'+fmt(inv.total||0)+'</td>'+
+    '</tr>';
+  }).join('');
+
+  const logo=DB.logo?'<img src="'+DB.logo+'" style="width:55px;height:55px;object-fit:contain;border-radius:8px;">'
+    :'<div style="width:55px;height:55px;background:#f5f0e8;border:2px solid #b8892a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:26px;">🏢</div>';
+
   const win=window.open('','_blank');
   const htmlContent='<!DOCTYPE html><html dir="rtl" lang="ar"><head>'+
     '<meta charset="UTF-8">'+
-    '<title>طباعة الفواتير المحددة</title>'+
+    '<title>كشف الفواتير المحددة</title>'+
     '<style>'+
     '@import url(\'https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap\');'+
     '*{margin:0;padding:0;box-sizing:border-box;}'+
     'body{font-family:\'Cairo\',sans-serif;background:#f0f0f0;padding:20px;direction:rtl;}'+
-    '.summary-bar{background:#1a5276;color:white;border-radius:10px;padding:14px 20px;display:flex;justify-content:space-around;margin-bottom:20px;text-align:center;}'+
-    '.summary-bar div div:first-child{font-size:11px;color:#a0c0e0;}'+
-    '.summary-bar div div:last-child{font-size:16px;font-weight:800;}'+
-    '@media print{body{background:white;padding:5px;}.no-print{display:none!important;}.summary-bar{margin-bottom:14px;}}'+
+    '.page{background:white;border-radius:12px;padding:28px;box-shadow:0 2px 12px rgba(0,0,0,0.1);}'+
+    '.header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1a5276;padding-bottom:14px;margin-bottom:20px;}'+
+    '.logo-area{display:flex;align-items:center;gap:12px;}'+
+    '.company-name{font-size:20px;font-weight:900;color:#1a5276;}'+
+    '.company-sub{font-size:11px;color:#888;}'+
+    '.title-area{text-align:left;}'+
+    '.kshf-title{font-size:17px;font-weight:800;color:#b8892a;}'+
+    '.kshf-date{font-size:12px;color:#555;}'+
+    'table{width:100%;border-collapse:collapse;font-size:12px;}'+
+    'thead tr{background:#1a5276;color:white;}'+
+    'thead th{padding:9px 10px;text-align:right;font-weight:700;}'+
+    'tbody tr:nth-child(even){background:#f8fafc;}'+
+    '.total-row{background:#1a5276!important;color:white;font-weight:800;}'+
+    '.summary{display:flex;gap:16px;margin-bottom:20px;}'+
+    '.summary-card{flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center;}'+
+    '.summary-card .label{font-size:11px;color:#888;margin-bottom:4px;}'+
+    '.summary-card .value{font-size:16px;font-weight:800;color:#1a5276;}'+
+    '.summary-card .value.tax{color:#b8892a;}'+
+    '.summary-card .value.total{color:#059669;}'+
+    '.sign-row{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:30px;padding-top:16px;border-top:1px solid #ddd;text-align:center;}'+
+    '.sign-row div div:first-child{height:40px;}'+
+    '.sign-row div div:last-child{border-top:1px solid #999;padding-top:6px;font-size:12px;font-weight:700;}'+
+    '@media print{body{background:white;padding:5px;}.no-print{display:none!important;}}'+
     '</style></head><body>'+
     '<div class="no-print" style="text-align:center;margin-bottom:16px;">'+
       '<button onclick="window.print()" style="background:#1a5276;color:white;border:none;padding:10px 28px;border-radius:8px;font-family:Cairo,sans-serif;font-size:14px;font-weight:700;cursor:pointer;">🖨 طباعة</button>'+
       '<button onclick="window.close()" style="background:#666;color:white;border:none;padding:10px 20px;border-radius:8px;font-family:Cairo,sans-serif;font-size:14px;cursor:pointer;margin-right:10px;">✕ إغلاق</button>'+
     '</div>'+
-    '<div class="summary-bar">'+
-      '<div><div>عدد الفواتير</div><div>'+selectedInvs.length+' فاتورة</div></div>'+
-      '<div><div>بدون ضريبة</div><div>'+fmt(totalAmt)+' ر.س</div></div>'+
-      '<div><div>الضريبة</div><div style="color:#f59e0b;">'+fmt(totalTax)+' ر.س</div></div>'+
-      '<div><div>الإجمالي الكلي</div><div style="color:#f0c866;">'+fmt(totalAll)+' ر.س</div></div>'+
+    '<div class="page">'+
+      '<div class="header">'+
+        '<div class="logo-area">'+logo+'<div><div class="company-name">'+companyName+'</div><div class="company-sub">نظام إدارة تكاليف المشاريع</div></div></div>'+
+        '<div class="title-area"><div class="kshf-title">كشف تفصيلي</div><div class="kshf-date">تاريخ الطباعة: '+new Date().toLocaleDateString('ar-SA')+'</div></div>'+
+      '</div>'+
+      '<div class="summary">'+
+        '<div class="summary-card"><div class="label">عدد الفواتير</div><div class="value">'+selectedInvs.length+' فاتورة</div></div>'+
+        '<div class="summary-card"><div class="label">بدون ضريبة</div><div class="value">'+fmt(totalAmt)+' ر.س</div></div>'+
+        '<div class="summary-card"><div class="label">الضريبة</div><div class="value tax">'+fmt(totalTax)+' ر.س</div></div>'+
+        '<div class="summary-card"><div class="label">الإجمالي الكلي</div><div class="value total">'+fmt(totalAll)+' ر.س</div></div>'+
+      '</div>'+
+      '<table>'+
+        '<thead><tr>'+
+          '<th style="width:30px;text-align:center;">#</th>'+
+          '<th>رقم الفاتورة</th>'+
+          '<th>المورد</th>'+
+          '<th>وصف الخدمة</th>'+
+          '<th>رقم السيارة</th>'+
+          '<th>المشروع</th>'+
+          '<th>البند</th>'+
+          '<th>التاريخ</th>'+
+          '<th>القيمة</th>'+
+          '<th>الضريبة</th>'+
+          '<th>الإجمالي</th>'+
+        '</tr></thead>'+
+        '<tbody>'+tableRows+
+          '<tr class="total-row">'+
+            '<td colspan="8" style="padding:9px 10px;text-align:center;">الإجمالي</td>'+
+            '<td style="padding:9px 10px;text-align:left;">'+fmt(totalAmt)+'</td>'+
+            '<td style="padding:9px 10px;text-align:left;">'+fmt(totalTax)+'</td>'+
+            '<td style="padding:9px 10px;text-align:left;">'+fmt(totalAll)+'</td>'+
+          '</tr>'+
+        '</tbody>'+
+      '</table>'+
+      '<div class="sign-row">'+
+        '<div><div></div><div>توقيع المورد</div></div>'+
+        '<div><div></div><div>محاسب المشاريع</div></div>'+
+      '</div>'+
     '</div>'+
-    invoicePages+
   '</body></html>';
   win.document.write(htmlContent);
   win.document.close();
