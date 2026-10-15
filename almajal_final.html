@@ -689,7 +689,7 @@ function renderHeader(){
     `;
   }
   document.getElementById('header-kpis').innerHTML=`
-    <button onclick="exportExcel()" style="display:flex;align-items:center;gap:5px;padding:6px 13px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.22);border-radius:50px;color:#34d399;font-family:var(--font);font-weight:600;font-size:11px;cursor:pointer;">⬇ Excel</button>
+    <button onclick="exportAllDataExcel()" style="display:flex;align-items:center;gap:5px;padding:6px 13px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.22);border-radius:50px;color:#34d399;font-family:var(--font);font-weight:600;font-size:11px;cursor:pointer;">⬇ Excel</button>
     <button onclick="exportBackup()" style="display:flex;align-items:center;gap:5px;padding:6px 13px;background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.22);border-radius:50px;color:var(--gold2);font-family:var(--font);font-weight:600;font-size:11px;cursor:pointer;">💾 Backup</button>
     ${alertCount>0?'<button onclick="switchTab(\'alerts\')" style="display:flex;align-items:center;gap:6px;padding:6px 13px;background:rgba(244,63,94,0.1);border:1px solid rgba(244,63,94,0.3);border-radius:50px;color:#f87171;font-family:var(--font);font-weight:700;font-size:11px;cursor:pointer;"><span class="notif-dot" style="background:#f43f5e;"></span>'+alertCount+' تنبيه</button>':''}
     <div class="kpi-pill" style="background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.18);"><span class="kpi-label">الميزانية</span><span class="kpi-val" style="color:var(--gold2);">${fmtC(totAp)} ${SAR}</span></div>
@@ -7625,7 +7625,7 @@ function importBackup(e){
   r.onload=ev=>{ try{DB=JSON.parse(ev.target.result);saveDB();showToast('تم استيراد البيانات ✓','#10b981');render();}catch(err){showToast('خطأ في الملف','#f43f5e');} };
   r.readAsText(file);
 }
-function exportExcel(){
+function exportAllDataExcel(){
   const wb=XLSX.utils.book_new();
   const ls=lineSpentAll();
   const pt=projTotals();
