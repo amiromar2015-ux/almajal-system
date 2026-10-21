@@ -51,7 +51,7 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 <title>شركة مجموعة المجال العربي — نظام إدارة التكاليف</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&family=Noto+Kufi+Arabic:wght@400;500;600;700;800;900&family=Tajawal:wght@300;400;500;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&family=Tajawal:wght@300;400;500;700;800&display=swap');
 :root {
   --bg:#f0f2f5;--bg2:#ffffff;--bg3:#e8eaed;
   --border:rgba(0,0,0,0.08);--border2:rgba(0,0,0,0.14);
@@ -59,8 +59,8 @@ window.addEventListener('DOMContentLoaded', () => {
   --green:#059669;--yellow:#d97706;--red:#e11d48;--blue:#0284c7;
   --indigo:#4f46e5;--purple:#7c3aed;--orange:#ea580c;
   --gold:#b8892a;--gold2:#9a7020;
-  --font:'Cairo','Noto Kufi Arabic','Tajawal',sans-serif;
-  --font-display:'Noto Kufi Arabic','Cairo',sans-serif;
+  --font:'Cairo','Tajawal',sans-serif;
+  --font-display:'Cairo','Tajawal',sans-serif;
   --company:'شركة مجموعة المجال العربي';
 }
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -415,6 +415,20 @@ function loadDB(){
   if(!DB.vehicleExpenses) DB.vehicleExpenses=[];
   if(!DB.claims) DB.claims=[];
   if(!DB.custodies) DB.custodies=[];
+  if(!DB.transactions) DB.transactions=[];
+  if(!DB.items) DB.items=[];
+  if(!DB.stockMovements) DB.stockMovements=[];
+  if(!DB.statements) DB.statements=[];
+  if(!DB.assets) DB.assets=[];
+  if(!DB.extracts) DB.extracts=[];
+  if(!DB.vehicles) DB.vehicles=[];
+  if(!DB.vehicleExpenses) DB.vehicleExpenses=[];
+  if(!DB.contracts) DB.contracts=[];
+  if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
+  if(!DB.fixedExpenses) DB.fixedExpenses=[];
+  if(!DB.tasks) DB.tasks=[];
+  if(DB.currentUserId===undefined) DB.currentUserId='';
 }
 
 /* ═══════════════════════
@@ -468,6 +482,7 @@ async function fbLoad(){
   if(DB.currentUserId===undefined) DB.currentUserId='';
     if(!DB.fixedExpenses) DB.fixedExpenses=[];
     if(!DB.tasks) DB.tasks=[];
+    if(!DB.transactions) DB.transactions=[];
     // تأكد من وجود حقول المطالبات الجديدة
     DB.claims=DB.claims.map(c=>({notes:c.notes||'',...c}));
     // فصل المستخلصات عن كشوف التخفيض نهائياً
@@ -509,11 +524,41 @@ function initFirebase(){
   window._fbSave = fbLoad; // placeholder
   fbLoad().then(()=>{
     window._fbSave = fbSave;
+    if(!DB.transactions) DB.transactions=[];
+    if(!DB.claims) DB.claims=[];
+    if(!DB.invoices) DB.invoices=[];
+    if(!DB.projects) DB.projects=[];
+    if(!DB.lines) DB.lines=[];
+    if(!DB.employees) DB.employees=[];
+    if(!DB.monthlyBudgets) DB.monthlyBudgets=[];
+    if(!DB.fixedExpenses) DB.fixedExpenses=[];
+    if(!DB.tasks) DB.tasks=[];
+    if(!DB.items) DB.items=[];
+    if(!DB.stockMovements) DB.stockMovements=[];
+    if(!DB.statements) DB.statements=[];
+    if(!DB.assets) DB.assets=[];
+    if(!DB.extracts) DB.extracts=[];
+    if(!DB.vehicles) DB.vehicles=[];
+    if(!DB.vehicleExpenses) DB.vehicleExpenses=[];
+    if(!DB.contracts) DB.contracts=[];
+    if(!DB.purchaseRequests) DB.purchaseRequests=[];
+    if(!DB.deductStatements) DB.deductStatements=[];
+    if(!DB.custodies) DB.custodies=[];
+    render();
     showToast('🔗 متصل بالسحابة','#10b981');
   }).catch(()=>{});
 }
 
 setTimeout(initFirebase, 1000);
+
+// حفظ تلقائي كل 5 دقايق
+setInterval(()=>{
+  if(window._fbSave && window._fbSave.toString().includes('PATCH')){
+    window._fbSave();
+    localStorage.setItem('almajal_last_autosave', Date.now().toString());
+    showToast('💾 تم الحفظ التلقائي','#10b981');
+  }
+}, 5 * 60 * 1000);
 
 /* ═══════════════════════════════════
    AUTO BACKUP
@@ -568,9 +613,9 @@ setTimeout(()=>{
 function lineSpentAll(){
   const map={};
   // Transactions (includes invoices from invoices tab)
-  DB.transactions.filter(t=>t.type==='out').forEach(t=>{ if(t.budgetLineId) map[t.budgetLineId]=(map[t.budgetLineId]||0)+t.amount; });
+  (DB.transactions||[]).filter(t=>t.type==='out').forEach(t=>{ if(t.budgetLineId) map[t.budgetLineId]=(map[t.budgetLineId]||0)+t.amount; });
   // Claims
-  DB.claims.forEach(c=>{ if(c.budgetLineId) map[c.budgetLineId]=(map[c.budgetLineId]||0)+c.amount; });
+  (DB.claims||[]).forEach(c=>{ if(c.budgetLineId) map[c.budgetLineId]=(map[c.budgetLineId]||0)+c.amount; });
   return map;
 }
 
@@ -651,7 +696,7 @@ function monthlyData(year,month,projectId){
   const prefix=`${year}-${String(month).padStart(2,'0')}`;
   const isAll=projectId==='all';
   const filterP=t=>isAll||t.projectId===projectId;
-  const txs=DB.transactions.filter(t=>t.date&&t.date.startsWith(prefix)&&filterP(t));
+  const txs=( DB.transactions||[] ).filter(t=>t.date&&t.date.startsWith(prefix)&&filterP(t));
   const custs=DB.custodies.filter(c=>c.issuedAt&&c.issuedAt.startsWith(prefix)&&filterP(c));
   const clms=DB.claims.filter(c=>c.date&&c.date.startsWith(prefix)&&filterP(c));
   const ls=lineSpentAll();
@@ -672,7 +717,7 @@ function monthlyData(year,month,projectId){
   const openCusts=DB.custodies.filter(c=>c.status!=='settled'&&filterP(c));
   const pendClaims=DB.claims.filter(c=>c.status==='pending'&&filterP(c));
   const endDate=`${year}-${String(month).padStart(2,'0')}-31`;
-  const cumSpent=DB.transactions.filter(t=>t.type==='out'&&t.date<=endDate&&filterP(t)).reduce((s,t)=>s+t.amount,0)
+  const cumSpent=( DB.transactions||[] ).filter(t=>t.type==='out'&&t.date<=endDate&&filterP(t)).reduce((s,t)=>s+t.amount,0)
     +DB.custodies.filter(c=>c.issuedAt<=endDate&&filterP(c)).reduce((s,c)=>(c.invoices||[]).reduce((a,i)=>a+i.amount,0)+s,0)
     +DB.claims.filter(c=>c.date<=endDate&&filterP(c)).reduce((s,c)=>s+c.amount,0);
   return {byLine:Object.values(byLine),totalSpent,totalApproved,openCusts,pendClaims,cumSpent,txs,custs,clms};
@@ -822,8 +867,8 @@ function executiveHTML(){
   const netProfit     = totalRevenue-totalSpent;
   const openCusts     = DB.custodies.filter(c=>c.status!=='settled');
   const openCustsVal  = openCusts.reduce((s,c)=>s+c.amount,0);
-  const weekSpent     = DB.transactions.filter(t=>t.type==='out'&&t.date>=weekStr).reduce((s,t)=>s+t.amount,0);
-  const todaySpent    = DB.transactions.filter(t=>t.type==='out'&&t.date===todayStr).reduce((s,t)=>s+t.amount,0);
+  const weekSpent     = ( DB.transactions||[] ).filter(t=>t.type==='out'&&t.date>=weekStr).reduce((s,t)=>s+t.amount,0);
+  const todaySpent    = ( DB.transactions||[] ).filter(t=>t.type==='out'&&t.date===todayStr).reduce((s,t)=>s+t.amount,0);
   const assetsVal     = assets.reduce((s,a)=>s+(a.value||0),0);
   const needMaint     = assets.filter(a=>a.condition==='يحتاج صيانة').length;
   const alerts        = getBudgetAlerts();
@@ -1157,7 +1202,7 @@ function searchHTML(){
   const results = [];
 
   // Search transactions
-  DB.transactions.forEach(t=>{
+  (DB.transactions||[]).forEach(t=>{
     if(!t.description?.toLowerCase().includes(q)&&!t.date?.includes(q)) return;
     results.push({type:'tx',icon:'💰',title:t.description||t.category,sub:`${projById(t.projectId).name} · ${t.date}`,amount:t.amount,amountCol:t.type==='in'?'#10b981':'#f43f5e',sign:t.type==='in'?'+':'-',action:`switchTab('txs')`});
   });
@@ -1228,7 +1273,7 @@ function dailyHTML(){
   const weekStr  = weekAgo.toISOString().slice(0,10);
 
   // Today's transactions
-  const todayTxs    = DB.transactions.filter(t=>t.date===todayStr);
+  const todayTxs    = ( DB.transactions||[] ).filter(t=>t.date===todayStr);
   const todayCusts  = DB.custodies.filter(c=>c.issuedAt===todayStr);
   const todayClaims = DB.claims.filter(c=>c.date===todayStr);
   const todayOut    = todayTxs.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0);
@@ -1237,7 +1282,7 @@ function dailyHTML(){
   const todayClaimAmt=todayClaims.reduce((s,c)=>s+c.amount,0);
 
   // Week transactions
-  const weekTxs    = DB.transactions.filter(t=>t.date>=weekStr&&t.date<=todayStr);
+  const weekTxs    = ( DB.transactions||[] ).filter(t=>t.date>=weekStr&&t.date<=todayStr);
   const weekOut    = weekTxs.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0);
   const weekIn     = weekTxs.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0);
   const weekCusts  = DB.custodies.filter(c=>c.issuedAt>=weekStr&&c.issuedAt<=todayStr).reduce((s,c)=>s+c.amount,0);
@@ -1305,7 +1350,7 @@ function dailyHTML(){
   <div class="glass" style="padding:18px;">
     <div style="font-weight:700;font-size:13px;color:var(--text2);margin-bottom:16px;">مصروف كل مشروع — آخر 7 أيام</div>
     ${DB.projects.map(p=>{
-      const pDays=days.map(d=>DB.transactions.filter(t=>t.type==='out'&&t.date===d&&t.projectId===p.id).reduce((s,t)=>s+t.amount,0));
+      const pDays=days.map(d=>( DB.transactions||[] ).filter(t=>t.type==='out'&&t.date===d&&t.projectId===p.id).reduce((s,t)=>s+t.amount,0));
       const total=pDays.reduce((s,v)=>s+v,0);
       const max=Math.max(...pDays)||1;
       return `
@@ -6162,7 +6207,7 @@ function selectColor(c,btn){
 
 function deleteTransaction(idx){
   if(!confirm('حذف هذه الحركة؟')) return;
-  DB.transactions.splice(idx,1);
+  (DB.transactions||[]).splice(idx,1);
   saveDB(); render();
   showToast('✅ تم حذف الحركة','#10b981');
 }
