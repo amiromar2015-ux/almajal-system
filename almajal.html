@@ -462,7 +462,26 @@ async function fbLoad(){
     }
     const d = merged;
     if(!d.projects) return;
+    // دمج Firebase مع localStorage — نأخذ الأحدث لكل مصفوفة
+    const local = DB; // البيانات المحلية الحالية
     DB = d;
+    // أي مصفوفة في localStorage أكبر من Firebase نحتفظ بها (حماية من فقدان البيانات)
+    const arrays = ['invoices','claims','custodies','transactions','employees','lines','projects',
+      'monthlyBudgets','fixedExpenses','tasks','items','stockMovements','statements',
+      'assets','extracts','vehicles','vehicleExpenses','contracts','purchaseRequests','deductStatements'];
+    arrays.forEach(key=>{
+      const fb = DB[key]||[];
+      const loc = local[key]||[];
+      if(loc.length > fb.length){
+        // دمج: نضيف العناصر الموجودة في local وغير موجودة في Firebase
+        const fbIds = new Set(fb.map(x=>x.id));
+        const extra = loc.filter(x=>x.id && !fbIds.has(x.id));
+        if(extra.length > 0){
+          DB[key] = [...fb, ...extra];
+          console.log(`Merged ${extra.length} local-only items into DB.${key}`);
+        }
+      }
+    });
     // تأكد من وجود كل الحقول الجديدة
     if(!DB.monthlyBudgets) DB.monthlyBudgets=[];
     if(!DB.companyName) DB.companyName=COMPANY;
@@ -478,8 +497,8 @@ async function fbLoad(){
     if(!DB.invoices) DB.invoices=[];
     if(!DB.contracts) DB.contracts=[];
     if(!DB.purchaseRequests) DB.purchaseRequests=[];
-  if(!DB.deductStatements) DB.deductStatements=[];
-  if(DB.currentUserId===undefined) DB.currentUserId='';
+    if(!DB.deductStatements) DB.deductStatements=[];
+    if(DB.currentUserId===undefined) DB.currentUserId='';
     if(!DB.fixedExpenses) DB.fixedExpenses=[];
     if(!DB.tasks) DB.tasks=[];
     if(!DB.transactions) DB.transactions=[];
