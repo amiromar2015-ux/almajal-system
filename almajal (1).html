@@ -51,7 +51,7 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 <title>شركة مجموعة المجال العربي — نظام إدارة التكاليف</title>
 <style>
-/* Arabic system fonts — no external dependency */
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&family=Tajawal:wght@300;400;500;700;800&display=swap');
 :root {
   --bg:#f0f2f5;--bg2:#ffffff;--bg3:#e8eaed;
   --border:rgba(0,0,0,0.08);--border2:rgba(0,0,0,0.14);
@@ -59,8 +59,8 @@ window.addEventListener('DOMContentLoaded', () => {
   --green:#059669;--yellow:#d97706;--red:#e11d48;--blue:#0284c7;
   --indigo:#4f46e5;--purple:#7c3aed;--orange:#ea580c;
   --gold:#b8892a;--gold2:#9a7020;
-  --font:'Segoe UI','Arial','Tahoma',sans-serif;
-  --font-display:'Segoe UI','Arial','Tahoma',sans-serif;
+  --font:'Cairo','Tajawal',sans-serif;
+  --font-display:'Cairo','Tajawal',sans-serif;
   --company:'شركة مجموعة المجال العربي';
 }
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -416,6 +416,19 @@ function loadDB(){
   if(!DB.claims) DB.claims=[];
   if(!DB.custodies) DB.custodies=[];
   if(!DB.transactions) DB.transactions=[];
+  if(!DB.items) DB.items=[];
+  if(!DB.stockMovements) DB.stockMovements=[];
+  if(!DB.statements) DB.statements=[];
+  if(!DB.assets) DB.assets=[];
+  if(!DB.extracts) DB.extracts=[];
+  if(!DB.vehicles) DB.vehicles=[];
+  if(!DB.vehicleExpenses) DB.vehicleExpenses=[];
+  if(!DB.contracts) DB.contracts=[];
+  if(!DB.purchaseRequests) DB.purchaseRequests=[];
+  if(!DB.deductStatements) DB.deductStatements=[];
+  if(!DB.fixedExpenses) DB.fixedExpenses=[];
+  if(!DB.tasks) DB.tasks=[];
+  if(DB.currentUserId===undefined) DB.currentUserId='';
 }
 
 /* ═══════════════════════
@@ -449,7 +462,26 @@ async function fbLoad(){
     }
     const d = merged;
     if(!d.projects) return;
+    // دمج Firebase مع localStorage — نأخذ الأحدث لكل مصفوفة
+    const local = DB; // البيانات المحلية الحالية
     DB = d;
+    // أي مصفوفة في localStorage أكبر من Firebase نحتفظ بها (حماية من فقدان البيانات)
+    const arrays = ['invoices','claims','custodies','transactions','employees','lines','projects',
+      'monthlyBudgets','fixedExpenses','tasks','items','stockMovements','statements',
+      'assets','extracts','vehicles','vehicleExpenses','contracts','purchaseRequests','deductStatements'];
+    arrays.forEach(key=>{
+      const fb = DB[key]||[];
+      const loc = local[key]||[];
+      if(loc.length > fb.length){
+        // دمج: نضيف العناصر الموجودة في local وغير موجودة في Firebase
+        const fbIds = new Set(fb.map(x=>x.id));
+        const extra = loc.filter(x=>x.id && !fbIds.has(x.id));
+        if(extra.length > 0){
+          DB[key] = [...fb, ...extra];
+          console.log(`Merged ${extra.length} local-only items into DB.${key}`);
+        }
+      }
+    });
     // تأكد من وجود كل الحقول الجديدة
     if(!DB.monthlyBudgets) DB.monthlyBudgets=[];
     if(!DB.companyName) DB.companyName=COMPANY;
@@ -465,8 +497,8 @@ async function fbLoad(){
     if(!DB.invoices) DB.invoices=[];
     if(!DB.contracts) DB.contracts=[];
     if(!DB.purchaseRequests) DB.purchaseRequests=[];
-  if(!DB.deductStatements) DB.deductStatements=[];
-  if(DB.currentUserId===undefined) DB.currentUserId='';
+    if(!DB.deductStatements) DB.deductStatements=[];
+    if(DB.currentUserId===undefined) DB.currentUserId='';
     if(!DB.fixedExpenses) DB.fixedExpenses=[];
     if(!DB.tasks) DB.tasks=[];
     if(!DB.transactions) DB.transactions=[];
@@ -511,11 +543,41 @@ function initFirebase(){
   window._fbSave = fbLoad; // placeholder
   fbLoad().then(()=>{
     window._fbSave = fbSave;
+    if(!DB.transactions) DB.transactions=[];
+    if(!DB.claims) DB.claims=[];
+    if(!DB.invoices) DB.invoices=[];
+    if(!DB.projects) DB.projects=[];
+    if(!DB.lines) DB.lines=[];
+    if(!DB.employees) DB.employees=[];
+    if(!DB.monthlyBudgets) DB.monthlyBudgets=[];
+    if(!DB.fixedExpenses) DB.fixedExpenses=[];
+    if(!DB.tasks) DB.tasks=[];
+    if(!DB.items) DB.items=[];
+    if(!DB.stockMovements) DB.stockMovements=[];
+    if(!DB.statements) DB.statements=[];
+    if(!DB.assets) DB.assets=[];
+    if(!DB.extracts) DB.extracts=[];
+    if(!DB.vehicles) DB.vehicles=[];
+    if(!DB.vehicleExpenses) DB.vehicleExpenses=[];
+    if(!DB.contracts) DB.contracts=[];
+    if(!DB.purchaseRequests) DB.purchaseRequests=[];
+    if(!DB.deductStatements) DB.deductStatements=[];
+    if(!DB.custodies) DB.custodies=[];
+    render();
     showToast('🔗 متصل بالسحابة','#10b981');
   }).catch(()=>{});
 }
 
 setTimeout(initFirebase, 1000);
+
+// حفظ تلقائي كل 5 دقايق
+setInterval(()=>{
+  if(window._fbSave && window._fbSave.toString().includes('PATCH')){
+    window._fbSave();
+    localStorage.setItem('almajal_last_autosave', Date.now().toString());
+    showToast('💾 تم الحفظ التلقائي','#10b981');
+  }
+}, 5 * 60 * 1000);
 
 /* ═══════════════════════════════════
    AUTO BACKUP
@@ -1778,6 +1840,7 @@ function custsHTML(){
       ${c.status!=='settled'?('<button onclick="openModal(\'settle\',\''+c.id+'\')" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:50px;padding:7px 16px;color:#fcd34d;font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;">تسوية العهدة ←</button>'):('<button onclick="reopenCustody(\''+c.id+'\')" style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);border-radius:50px;padding:7px 16px;color:#a5b4fc;font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;">↩ إعادة فتح</button>')}
       ${c.invoiceUrl?('<a href="'+c.invoiceUrl+'" target="_blank" style="display:inline-flex;align-items:center;gap:5px;margin-right:8px;font-size:12px;color:#38bdf8;text-decoration:none;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);border-radius:50px;padding:7px 14px;">🔗 فاتورة العهدة</a>'):''}
       <button onclick="printCustody('${c.id}')" style="background:rgba(212,168,67,0.1);border:1px solid rgba(212,168,67,0.25);border-radius:50px;padding:7px 16px;color:var(--gold2);font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;margin-right:8px;">🖨 طباعة السند</button>
+      <button onclick="printCustodyStatement('${c.id}')" style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);border-radius:50px;padding:7px 16px;color:#a5b4fc;font-family:var(--font);font-weight:600;font-size:12px;cursor:pointer;margin-right:8px;">📊 كشف الحساب</button>
     </div>`;
   }).join('');
   })()
@@ -3225,6 +3288,7 @@ function saveInvoiceRow(){
   const amount=parseFloat(document.getElementById('ni-amount')?.value)||0;
   const tax=parseFloat(document.getElementById('ni-tax')?.value)||0;
   const total=parseFloat(document.getElementById('ni-total')?.value)||0;
+  const custodyId=document.getElementById('ni-custody')?.value||'';
   if(!amount||amount<=0) return showToast('أدخل قيمة الفاتورة','#f43f5e');
   if(!supplier) return showToast('أدخل اسم المورد','#f43f5e');
   if(!DB.invoices) DB.invoices=[];
@@ -3241,8 +3305,16 @@ function saveInvoiceRow(){
       if(!confirm('⚠️ رقم الفاتورة "'+invoiceNo+'" مسجل مسبقاً عند المورد: '+dup.supplier+'\nهل تريد الإضافة على أي حال؟')) return; 
     }
   }
-  DB.invoices.push({id:uid(),invoiceNo,supplier,desc,vehicleNo,vehicleDetails,projectId:projId,lineId,date,amount,tax,total});
+  DB.invoices.push({id:uid(),invoiceNo,supplier,desc,vehicleNo,vehicleDetails,projectId:projId,lineId,date,amount,tax,total,custodyId});
   tempInvVehicles=[];
+  // ربط الفاتورة بالعهدة
+  if(custodyId){
+    const cust=DB.custodies.find(c=>c.id===custodyId);
+    if(cust){
+      if(!cust.invoices) cust.invoices=[];
+      cust.invoices.push({id:uid(),amount,supplier,desc,date,invoiceNo});
+    }
+  }
   // Add as transaction on project
   if(projId&&lineId){
     DB.transactions.push({id:uid(),projectId:projId,budgetLineId:lineId,vault:'cash',type:'out',amount,description:'فاتورة — '+supplier,date,payMethod:'cash'});
@@ -5317,6 +5389,17 @@ function getModalHTML(type,data){
       <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">الإجمالي</div>
       <input type="number" placeholder="0" id="ni-total" class="inp" style="font-weight:800;font-size:16px;text-align:center;">
     </div>
+    <div style="margin-bottom:16px;">
+      <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">📋 العهدة (اختياري)</div>
+      <select class="sel" id="ni-custody">
+        <option value="">— بدون عهدة —</option>
+        ${(DB.custodies||[]).filter(c=>c.status!=='settled').map(c=>{
+          const emp=(DB.employees||[]).find(e=>e.id===c.employeeId);
+          const proj=(DB.projects||[]).find(p=>p.id===c.projectId);
+          return `<option value="${c.id}">${emp?emp.name:'?'} — ${fmt(c.amount)} ر.س${proj?' ('+proj.name+')':''}</option>`;
+        }).join('')}
+      </select>
+    </div>
     <button class="btn btn-gold btn-full" onclick="saveInvoiceRow()">✓ حفظ الفاتورة</button>`;
   }
 
@@ -6175,6 +6258,76 @@ function saveTx(){
   DB.transactions.push({id:uid(),projectId:document.getElementById('tx-proj').value,budgetLineId:document.getElementById('tx-line').value,vault:document.getElementById('tx-vault').value,type:document.getElementById('tx-type').value,amount,description:document.getElementById('tx-desc').value,date:document.getElementById('tx-date').value,payMethod:'cash'});
   saveDB();closeModal();showToast('تم تسجيل الحركة ✓');render();
 }
+function printCustodyStatement(id){
+  const c=DB.custodies.find(x=>x.id===id); if(!c) return;
+  const emp=empById(c.employeeId);
+  const proj=projById(c.projectId);
+  const companyName=DB.companyName||COMPANY;
+  const logo=DB.logo?`<img src="${DB.logo}" style="width:55px;height:55px;object-fit:contain;border-radius:8px;">`:'<div style="width:55px;height:55px;background:#f5f0e8;border:2px solid #b8892a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:26px;">🏢</div>';
+  // فواتير العهدة من DB.invoices
+  const invs=(DB.invoices||[]).filter(i=>i.custodyId===id);
+  const totalInv=invs.reduce((s,i)=>s+(i.total||i.amount||0),0);
+  const returned=c.returned||0;
+  const remaining=c.amount-totalInv-returned;
+  const invRows=invs.length===0?'<tr><td colspan="5" style="text-align:center;color:#888;padding:16px;">لا توجد فواتير مرتبطة</td></tr>':
+    invs.map((inv,idx)=>`<tr style="background:${idx%2===0?'#f9f9f9':'#fff'};">
+      <td style="padding:8px 10px;text-align:center;">${idx+1}</td>
+      <td style="padding:8px 10px;">${inv.invoiceNo||'—'}</td>
+      <td style="padding:8px 10px;">${inv.supplier||'—'}</td>
+      <td style="padding:8px 10px;">${inv.desc||inv.description||'—'}</td>
+      <td style="padding:8px 10px;text-align:center;">${inv.date||'—'}</td>
+      <td style="padding:8px 10px;text-align:left;font-weight:700;">${fmt(inv.total||inv.amount||0)} ${SAR}</td>
+    </tr>`).join('');
+  const win=window.open('','_blank','width=820,height=900');
+  win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">
+<title>كشف حساب عهدة — ${emp.name}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Cairo',sans-serif;background:#fff;color:#1a1a1a;direction:rtl;padding:20px;}
+  .page{max-width:760px;margin:0 auto;}
+  .header{background:linear-gradient(135deg,#1a5276,#0f3460);color:#fff;padding:18px 24px;border-radius:10px 10px 0 0;display:flex;justify-content:space-between;align-items:center;}
+  .company{font-size:17px;font-weight:900;color:#f0c866;}
+  .summary{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin:16px 0;}
+  .sum-card{border-radius:8px;padding:12px;text-align:center;border:1px solid #e0e0e0;}
+  .sum-label{font-size:10px;color:#888;margin-bottom:4px;}
+  .sum-val{font-size:18px;font-weight:900;}
+  table{width:100%;border-collapse:collapse;margin-top:16px;}
+  th{background:#1a5276;color:#fff;padding:10px;font-size:12px;font-weight:700;}
+  td{font-size:12px;border-bottom:1px solid #eee;}
+  .footer{margin-top:20px;display:flex;justify-content:space-between;font-size:10px;color:#888;border-top:1px solid #eee;padding-top:10px;}
+  @media print{body{padding:0;}@page{margin:8mm;}}
+</style></head><body>
+<div class="page">
+  <div class="header">
+    <div style="display:flex;align-items:center;gap:12px;">${logo}<div><div class="company">${companyName}</div><div style="font-size:12px;color:#a0c0e0;">كشف حساب عهدة</div></div></div>
+    <div style="text-align:left;"><div style="font-weight:900;font-size:16px;color:#f0c866;">${emp.name}</div><div style="font-size:11px;color:#a0c0e0;">${proj.name} · ${c.issuedAt||''}</div></div>
+  </div>
+  <div class="summary">
+    <div class="sum-card"><div class="sum-label">إجمالي العهدة</div><div class="sum-val" style="color:#f59e0b;">${fmt(c.amount)} ${SAR}</div></div>
+    <div class="sum-card"><div class="sum-label">المصروف (فواتير)</div><div class="sum-val" style="color:#6366f1;">${fmt(totalInv)} ${SAR}</div></div>
+    <div class="sum-card"><div class="sum-label">المرتجع</div><div class="sum-val" style="color:#10b981;">${fmt(returned)} ${SAR}</div></div>
+    <div class="sum-card" style="background:${remaining>0?'#fff5f5':remaining<0?'#f0fff4':'#f0fff4'};border-color:${remaining>0?'#f43f5e':remaining<0?'#10b981':'#10b981'};">
+      <div class="sum-label">${remaining>0?'الباقي على الموظف':remaining<0?'زيادة للموظف':'مطابق تماماً'}</div>
+      <div class="sum-val" style="color:${remaining>0?'#f43f5e':remaining<0?'#10b981':'#10b981'};">${Math.abs(remaining)<0.5?'✓':fmt(Math.abs(remaining))+' '+SAR}</div>
+    </div>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>رقم الفاتورة</th><th>المورد</th><th>البيان</th><th>التاريخ</th><th>المبلغ</th></tr></thead>
+    <tbody>${invRows}</tbody>
+    <tfoot><tr style="background:#f0f4f8;font-weight:900;"><td colspan="5" style="padding:10px;text-align:right;">الإجمالي</td><td style="padding:10px;text-align:left;">${fmt(totalInv)} ${SAR}</td></tr></tfoot>
+  </table>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:40px;">
+    <div style="border-top:1.5px solid #1a5276;padding-top:8px;text-align:center;font-size:12px;color:#1a5276;font-weight:700;">توقيع الموظف: ${emp.name}</div>
+    <div style="border-top:1.5px solid #1a5276;padding-top:8px;text-align:center;font-size:12px;color:#1a5276;font-weight:700;">توقيع المحاسب</div>
+  </div>
+  <div class="footer"><span>${companyName}</span><span>طُبع بتاريخ: ${today()}</span></div>
+</div>
+<script>window.onload=()=>window.print();<\/script>
+</body></html>`);
+  win.document.close();
+}
+
 function printCustody(id){
   const c=DB.custodies.find(x=>x.id===id); if(!c) return;
   const emp=empById(c.employeeId);
