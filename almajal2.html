@@ -247,6 +247,11 @@ select option{background:#ffffff;}
         </div>
       </div>
       <div id="tabs-bar" style="display:flex;flex-direction:column;padding:8px 0;flex:1;overflow-y:auto;min-height:0;"></div>
+      <!-- Pinned bottom buttons -->
+      <div style="border-top:1px solid rgba(184,137,42,0.12);padding:6px 8px;flex-shrink:0;background:#fff;">
+        <button class="tab" onclick="switchTab('activityLog')" id="pin-activityLog" style="width:100%;"><span style="font-size:14px;width:18px;text-align:center;">📜</span><span>سجل النشاط</span></button>
+        <button class="tab" onclick="switchTab('settings')" id="pin-settings" style="width:100%;"><span style="font-size:14px;width:18px;text-align:center;">⚙</span><span>الإعدادات</span></button>
+      </div>
     </nav>
 
     <!-- MAIN CONTENT -->
@@ -896,6 +901,11 @@ function renderTabs(){
     });
   });
   document.getElementById('tabs-bar').innerHTML=html;
+  // Update pinned bottom tabs active state
+  ['activityLog','settings'].forEach(k=>{
+    const el=document.getElementById('pin-'+k);
+    if(el) el.className='tab'+(currentTab===k?' active':'');
+  });
 }
 
 function toggleSidebar(){
