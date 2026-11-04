@@ -3,8 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#1e293b">
 <script>
 // Password protection — SHA-256 hash
 const PASS_HASH = '76d11530d929d83aab83903f57df592f2b754aee63815183e62ecb6c93c596f5';
@@ -85,11 +83,13 @@ select option{background:#ffffff;}
 .kpi-pill{border-radius:50px;padding:6px 14px;text-align:center;}
 .kpi-label{font-size:8px;color:var(--text4);letter-spacing:.8px;display:block;}
 .kpi-val{font-weight:900;font-size:13px;line-height:1.2;}
-.tabs{display:flex;gap:2px;overflow-x:auto;border-top:1px solid rgba(0,0,0,0.06);}
-.tab{padding:10px 15px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text4);font-family:var(--font);font-weight:500;font-size:12px;cursor:pointer;transition:color .2s;white-space:nowrap;letter-spacing:.3px;}
-.tab.active{border-bottom-color:var(--gold);color:var(--gold2);font-weight:700;}
-.tab:hover{color:var(--text2);}
-.main{max-width:1100px;margin:0 auto;padding:22px 20px 130px;width:100%;}
+.tabs{display:flex;flex-direction:column;gap:2px;padding:6px 8px;}
+.tab{padding:10px 14px;background:none;border:none;border-radius:10px;color:var(--text3);font-family:var(--font);font-weight:500;font-size:12px;cursor:pointer;transition:all .18s;white-space:nowrap;letter-spacing:.3px;text-align:right;display:flex;align-items:center;gap:8px;border-left:3px solid transparent;}
+.tab.active{background:linear-gradient(135deg,rgba(184,137,42,0.1),rgba(184,137,42,0.05));border-left-color:var(--gold);color:var(--gold2);font-weight:700;}
+.tab:hover:not(.active){background:rgba(184,137,42,0.05);color:var(--text2);}
+.tab-group-label{font-size:9px;color:var(--text4);letter-spacing:1.2px;font-weight:700;padding:10px 14px 4px;text-transform:uppercase;}
+.sidebar-collapsed #sidebar{width:0;opacity:0;overflow:hidden;pointer-events:none;}
+.main{max-width:1200px;margin:0 auto;padding:22px 20px 130px;width:100%;}
 .glass{background:#ffffff;border:1px solid var(--border);border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);}
 .card{background:#ffffff;border:1px solid var(--border);border-radius:16px;padding:20px;transition:all .25s;box-shadow:0 1px 4px rgba(0,0,0,0.05);}
 .card:hover{border-color:rgba(184,137,42,0.3);transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,0,0,0.1);}
@@ -210,6 +210,7 @@ select option{background:#ffffff;}
 </div>
 
 <div id="app">
+  <!-- TOP HEADER -->
   <header class="header">
     <div class="header-inner">
       <div class="header-top">
@@ -226,11 +227,34 @@ select option{background:#ffffff;}
         <div style="flex:1;max-width:280px;margin:0 16px;position:relative;" id="search-bar-wrap"></div>
         <div id="save-indicator" style="font-size:11px;font-weight:700;min-width:100px;text-align:center;"></div>
         <div class="header-kpis" id="header-kpis"></div>
+        <!-- Sidebar toggle button -->
+        <button id="sidebar-toggle" onclick="toggleSidebar()" title="القائمة" style="background:none;border:1px solid rgba(184,137,42,0.3);border-radius:9px;width:36px;height:36px;cursor:pointer;color:var(--gold2);font-size:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">☰</button>
       </div>
-      <div class="tabs" id="tabs-bar"></div>
     </div>
   </header>
-  <main class="main" id="main-content"></main>
+
+  <!-- LAYOUT: SIDEBAR + CONTENT -->
+  <div id="app-layout" style="display:flex;min-height:calc(100vh - 66px);">
+
+    <!-- SIDEBAR -->
+    <nav id="sidebar" style="width:220px;background:#ffffff;border-left:1px solid rgba(184,137,42,0.15);position:sticky;top:66px;height:calc(100vh - 66px);overflow-y:auto;flex-shrink:0;transition:width .25s ease,opacity .25s ease;z-index:50;display:flex;flex-direction:column;">
+      <!-- Sidebar Logo -->
+      <div style="padding:16px 14px 10px;border-bottom:1px solid rgba(184,137,42,0.1);display:flex;align-items:center;gap:10px;flex-shrink:0;">
+        <div id="sidebar-logo-box" style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#f5f0e8,#ede0c4);border:1.5px solid rgba(184,137,42,0.4);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">🏢</div>
+        <div>
+          <div style="font-weight:900;font-size:11px;color:var(--gold2);line-height:1.3;">مجموعة المجال العربي</div>
+          <div style="font-size:9px;color:var(--text4);letter-spacing:.5px;margin-top:1px;">نظام إدارة التكاليف</div>
+        </div>
+      </div>
+      <div id="tabs-bar" style="display:flex;flex-direction:column;padding:8px 0;flex:1;"></div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+      <main class="main" id="main-content" style="padding-bottom:160px;"></main>
+    </div>
+  </div>
+
   <div class="fab-bar" id="fab-bar"></div>
 </div>
 
@@ -803,6 +827,8 @@ function renderHeader(){
   // Logo
   if(DB.logo){
     document.getElementById('logo-box').innerHTML=`<img src="${DB.logo}" class="logo-img">`;
+    const sb=document.getElementById('sidebar-logo-box');
+    if(sb) sb.innerHTML=`<img src="${DB.logo}" style="width:30px;height:30px;object-fit:contain;border-radius:7px;">`;
   }
   // Search bar
   const sbWrap=document.getElementById('search-bar-wrap');
@@ -828,33 +854,52 @@ function renderHeader(){
 
 function renderTabs(){
   const alerts=getBudgetAlerts();
-  const tabs=[
-    {k:'dash',lb:'◈ الرئيسية'},
-    {k:'executive',lb:'⚡ داشبورد المدير'},
-    {k:'daily',lb:'📅 يومي/أسبوعي'},
-    {k:'compare',lb:'⚖ مقارنة المشاريع'},
-    {k:'search',lb:globalSearch?'🔍 نتائج البحث':'🔍 بحث'},
-    {k:'detail',lb:'≡ المشاريع'},
-    {k:'custs',lb:'👤 العهد'},
-    {k:'suppliers',lb:'🏪 الموردين'},
-    {k:'extracts',lb:'📑 المستخلصات'},
-    {k:'alerts',lb:'🔔 التنبيهات'+(alerts.length>0?' ('+alerts.length+')':'')},
-    {k:'statements',lb:'📝 كشوف التخفيض'},
-    {k:'vehicles',lb:'🚗 السيارات والمعدات'},
-    {k:'assets',lb:'🏷️ الأصول'},
-    {k:'myaccount',lb:'👤 عهدتي'},
-    {k:'fixedExp',lb:'🏢 المصاريف الثابتة'},
-    {k:'tasks',lb:'✅ المهام والتذكيرات'},
-    {k:'purchaseReq',lb:'📋 طلبات الشراء'},
-    {k:'contracts',lb:'📄 العقود'},
-    {k:'invoices',lb:'🧾 الفواتير'},
-    {k:'reports',lb:'📊 التقارير الشهرية'},
-    {k:'fullreport',lb:'📋 التقرير الكامل'},
-    {k:'empReport',lb:'👤 تقرير الموظف'},{k:'activityLog',lb:'📜 سجل النشاط'},{k:'settings',lb:'⚙ الإعدادات'},
+  const groups=[
+    {label:'الرئيسية',tabs:[
+      {k:'dash',icon:'◈',lb:'الرئيسية'},
+      {k:'executive',icon:'⚡',lb:'داشبورد المدير'},
+      {k:'daily',icon:'📅',lb:'يومي / أسبوعي'},
+      {k:'compare',icon:'⚖',lb:'مقارنة المشاريع'},
+      {k:'search',icon:'🔍',lb:globalSearch?'نتائج البحث':'بحث'},
+    ]},
+    {label:'المشاريع والمالية',tabs:[
+      {k:'detail',icon:'≡',lb:'المشاريع'},
+      {k:'extracts',icon:'📑',lb:'المستخلصات'},
+      {k:'statements',icon:'📝',lb:'كشوف التخفيض'},
+      {k:'invoices',icon:'🧾',lb:'الفواتير'},
+      {k:'reports',icon:'📊',lb:'التقارير الشهرية'},
+      {k:'fullreport',icon:'📋',lb:'التقرير الكامل'},
+    ]},
+    {label:'الموارد',tabs:[
+      {k:'custs',icon:'👤',lb:'العهد'},
+      {k:'myaccount',icon:'🪪',lb:'عهدتي'},
+      {k:'suppliers',icon:'🏪',lb:'الموردين'},
+      {k:'vehicles',icon:'🚗',lb:'السيارات والمعدات'},
+      {k:'assets',icon:'🏷️',lb:'الأصول'},
+      {k:'fixedExp',icon:'🏢',lb:'المصاريف الثابتة'},
+    ]},
+    {label:'الإدارة',tabs:[
+      {k:'tasks',icon:'✅',lb:'المهام والتذكيرات'},
+      {k:'purchaseReq',icon:'📋',lb:'طلبات الشراء'},
+      {k:'contracts',icon:'📄',lb:'العقود'},
+      {k:'alerts',icon:'🔔',lb:'التنبيهات'+(alerts.length>0?' ('+alerts.length+')':'')},
+      {k:'empReport',icon:'👤',lb:'تقرير الموظف'},
+      {k:'activityLog',icon:'📜',lb:'سجل النشاط'},
+      {k:'settings',icon:'⚙',lb:'الإعدادات'},
+    ]},
   ];
-  document.getElementById('tabs-bar').innerHTML=tabs.map(t=>
-    `<button class="tab ${currentTab===t.k?'active':''}" onclick="switchTab('${t.k}')">${t.lb}</button>`
-  ).join('');
+  let html='';
+  groups.forEach(g=>{
+    html+=`<div class="tab-group-label">${g.label}</div>`;
+    g.tabs.forEach(t=>{
+      html+=`<button class="tab ${currentTab===t.k?'active':''}" onclick="switchTab('${t.k}')"><span style="font-size:14px;width:18px;text-align:center;">${t.icon}</span><span>${t.lb}</span></button>`;
+    });
+  });
+  document.getElementById('tabs-bar').innerHTML=html;
+}
+
+function toggleSidebar(){
+  document.getElementById('app-layout').classList.toggle('sidebar-collapsed');
 }
 
 function renderFab(){
@@ -2924,6 +2969,9 @@ function statementsHTML(){
     </div>
   </div>
 
+  <div style="margin-bottom:10px;">
+    <input class="inp" id="st-filter-search" placeholder="🔍 بحث برقم الكشف أو المشروع أو البند..." style="font-size:12px;" oninput="renderStatementsTable()">
+  </div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
     <select class="sel" id="st-filter-proj" style="font-size:12px;" onchange="renderStatementsTable()">
       <option value="">كل المشاريع</option>
@@ -2979,10 +3027,19 @@ function renderStatementsTable(){
   const projF=document.getElementById('st-filter-proj')?.value||'';
   const deductF=document.getElementById('st-filter-deduct')?.value||'';
   const locF=document.getElementById('st-filter-loc')?.value||'';
+  const searchF=(document.getElementById('st-filter-search')?.value||'').trim().toLowerCase();
   let exts=[...(DB.deductStatements||[])].reverse();
   if(projF) exts=exts.filter(e=>e.projectId===projF);
   if(deductF) exts=exts.filter(e=>e.deductStatus===deductF);
   if(locF) exts=exts.filter(e=>e.location===locF);
+  if(searchF) exts=exts.filter(e=>{
+    const proj=DB.projects.find(p=>p.id===e.projectId)||{name:''};
+    const line=DB.lines.find(l=>l.id===e.lineId)||{category:''};
+    return (e.refNum||'').toLowerCase().includes(searchF)||
+           proj.name.toLowerCase().includes(searchF)||
+           line.category.toLowerCase().includes(searchF)||
+           (e.notes||'').toLowerCase().includes(searchF);
+  });
 
   // تحديث الملخص المفلتر
   const filtTotal=exts.reduce((s,e)=>s+(e.amount||0),0);
@@ -8300,5 +8357,6 @@ render();
 
 
 </script>
+<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js');}</script>
 </body>
 </html>
