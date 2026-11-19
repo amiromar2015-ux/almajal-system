@@ -5777,8 +5777,9 @@ function getModalHTML(type,data){
     <input placeholder="وصف الخدمة / المنتج" id="ni-desc" class="inp" style="margin-bottom:10px;">
     <div style="margin-bottom:10px;">
       <div style="font-size:11px;color:var(--text4);margin-bottom:4px;">🏷️ رقم الأصل (اختياري — سيارة / معدة / آلة)</div>
-      <input placeholder="مثال: VH-001 أو EQ-005" id="ni-asset-no" class="inp" style="font-size:12px;"
-        list="assets-no-list" autocomplete="off">
+      <input placeholder="يتملأ تلقائياً من رقم السيارة" id="ni-asset-no" class="inp" style="font-size:12px;"
+        list="assets-no-list" autocomplete="off"
+        oninput="this.dataset.manualEdit='1';this.style.borderColor='';">
       <datalist id="assets-no-list">
         ${[...(DB.vehicles||[]).map(v=>v.plate||v.name),...(DB.assets||[]).map(a=>a.name)].filter(Boolean).map(a=>'<option value="'+a+'">').join('')}
       </datalist>
@@ -5788,7 +5789,7 @@ function getModalHTML(type,data){
       <div id="ni-vehicles-list"></div>
       <div style="display:grid;grid-template-columns:1fr 120px 30px;gap:6px;margin-top:6px;">
         <input placeholder="رقم السيارة" id="ni-veh-no" class="inp" style="font-size:12px;"
-          list="vehicles-list" autocomplete="off">
+          list="vehicles-list" autocomplete="off" oninput="autoFillAssetNo(this.value)">
         <datalist id="vehicles-list">
           ${[...new Set([...(DB.vehicles||[]).map(v=>v.name),...(DB.invoices||[]).flatMap(i=>(i.vehicleDetails||[]).map(v=>v.no)).filter(Boolean)])].map(v=>'<option value="'+v+'">').join('')}
         </datalist>
@@ -7840,6 +7841,43 @@ function confirmBook3Import(){
   render();
   logActivity('add','asset',`استيراد Book3: ${toAdd.length} أصل من نظام المحاسبة`);
   showToast(`✅ تم استيراد ${toAdd.length} أصل بنجاح`,'#10b981');
+}
+
+// ربط رقم السيارة برقم الأصل تلقائياً بناءً على المشروع المحدد
+function autoFillAssetNo(vehicleNo){
+  if(!vehicleNo || vehicleNo.length < 2) return;
+  const assetNoField = document.getElementById('ni-asset-no');
+  if(!assetNoField) return;
+  // لا تعيد الكتابة لو المستخدم كتب شيء يدوياً
+  if(assetNoField.dataset.manualEdit === '1') return;
+
+  // المشروع المحدد حالياً
+  const projId = document.getElementById('ni-proj')?.value || '';
+
+  // ابحث في الأصول المرتبطة بنفس المشروع
+  const assets = (DB.assets || []).filter(a => {
+    if(projId && a.projectId && a.projectId !== projId) return false;
+    // ابحث بالرقم في اسم الأصل أو serialNo أو assetNo
+    const haystack = (a.name + ' ' + (a.serialNo||'') + ' ' + (a.assetNo||'')).toLowerCase();
+    return haystack.includes(vehicleNo.toLowerCase());
+  });
+
+  if(assets.length === 1){
+    // وجد نتيجة وحيدة — املأ تلقائياً
+    assetNoField.value = assets[0].assetNo || assets[0].id;
+    assetNoField.style.borderColor = 'rgba(16,185,129,0.5)';
+    assetNoField.title = assets[0].name;
+  } else if(assets.length > 1){
+    // أكتر من نتيجة — اعرض في datalist وخلي المستخدم يختار
+    let dl = document.getElementById('assets-no-list');
+    if(dl){
+      dl.innerHTML = assets.map(a=>`<option value="${a.assetNo||a.id}">${a.name}</option>`).join('');
+    }
+    assetNoField.style.borderColor = 'rgba(245,158,11,0.5)';
+  } else {
+    // ما لاقى شيء
+    assetNoField.style.borderColor = '';
+  }
 }
 
 function editAssetCondition(id){ openModal('editAsset',id); }
