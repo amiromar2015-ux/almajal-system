@@ -7734,12 +7734,10 @@ function importBook3Assets(event){
       const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
       if(aoa.length < 2) return showToast('الملف فاضي','#f43f5e');
 
-      // Auto-detect column positions from header row
-      const hdr = aoa[0].map(h=>String(h||'').trim());
-      // Column indices
-      const iAssetNo  = hdr.findIndex(h=>h.includes('Asset Cost')||h==' ') !== -1
-                        ? hdr.findIndex(h=>h==' ')||1 : 1;      // unnamed col = index 1
-      const iName     = 3;   // "ء" column = Arabic name
+      // Column indices ثابتة بناءً على بنية Book3
+      // Book | رقم الأصل | كود الحساب | الاسم | الموديل | التسلسلي | الفئة | الموقع | الوحدة | الخردة | الموظف | رقم الموظف
+      const iAssetNo  = 1;   // العمود الثاني = رقم الأصل الفريد
+      const iName     = 3;   // العمود الرابع = اسم الأصل بالعربي
       const iModel    = 4;   // Model Number
       const iSerial   = 5;   // Serial Number
       const iCategory = 6;   // Major Category
@@ -7863,15 +7861,15 @@ function autoFillAssetNo(vehicleNo){
   });
 
   if(assets.length === 1){
-    // وجد نتيجة وحيدة — املأ تلقائياً
-    assetNoField.value = assets[0].assetNo || assets[0].id;
+    // وجد نتيجة وحيدة — املأ تلقائياً برقم الأصل من Book3 فقط
+    assetNoField.value = assets[0].assetNo || '';
     assetNoField.style.borderColor = 'rgba(16,185,129,0.5)';
     assetNoField.title = assets[0].name;
   } else if(assets.length > 1){
-    // أكتر من نتيجة — اعرض في datalist وخلي المستخدم يختار
+    // أكتر من نتيجة — اعرض في datalist برقم الأصل فقط
     let dl = document.getElementById('assets-no-list');
     if(dl){
-      dl.innerHTML = assets.map(a=>`<option value="${a.assetNo||a.id}">${a.name}</option>`).join('');
+      dl.innerHTML = assets.map(a=>`<option value="${a.assetNo||''}">${a.assetNo} — ${a.name}</option>`).join('');
     }
     assetNoField.style.borderColor = 'rgba(245,158,11,0.5)';
   } else {
