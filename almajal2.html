@@ -3478,8 +3478,12 @@ function assetsHTML(){
     <div style="font-weight:800;font-size:16px;">🏷️ سجل الأصول الثابتة</div>
     <div style="display:flex;gap:8px;">
       <button onclick="downloadAssetTemplate()" class="btn btn-ghost btn-pill btn-sm" style="border-color:rgba(56,189,248,0.3);color:#38bdf8;">⬇ Template Excel</button>
-      <label class="btn btn-ghost btn-pill btn-sm" style="border-color:rgba(16,185,129,0.3);color:#34d399;cursor:pointer;">
-        📂 استيراد من Excel
+      <label class="btn btn-ghost btn-pill btn-sm" style="border-color:rgba(16,185,129,0.3);color:#34d399;cursor:pointer;" title="استيراد من ملف Book3 (نظام محاسبة الأصول)">
+        📥 استيراد Book3
+        <input type="file" accept=".xlsx,.xls" style="display:none;" onchange="importBook3Assets(event)">
+      </label>
+      <label class="btn btn-ghost btn-pill btn-sm" style="border-color:rgba(16,185,129,0.15);color:var(--text3);cursor:pointer;" title="استيراد من Template النظام">
+        📂 استيراد قياسي
         <input type="file" accept=".xlsx,.xls" style="display:none;" onchange="importAssetsExcel(event)">
       </label>
       <button onclick="printAssetsReport()" class="btn btn-ghost btn-pill btn-sm" style="border-color:rgba(212,168,67,0.3);color:var(--gold2);">🖨 طباعة البيان</button>
@@ -6381,6 +6385,54 @@ function getModalHTML(type,data){
     </div>
     <button class="btn btn-gold btn-full" onclick="saveExtract()">✓ حفظ المستخلص</button>`;}
 
+  if(type==='confirmBook3Import'){
+    const q = window._book3ImportQueue||[];
+    const dup = window._book3ImportDuplicate||0;
+    const skip = window._book3ImportSkipped||0;
+    // Count by type
+    const byType = {};
+    q.forEach(a=>{ byType[a.type]=(byType[a.type]||0)+1; });
+    // Sample first 5
+    const sample = q.slice(0,5);
+    return `
+    <div class="sheet-title"><h3>📥 تأكيد استيراد الأصول</h3>${close}</div>
+    <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:10px;padding:14px;margin-bottom:14px;">
+      <div style="font-size:22px;font-weight:900;color:#10b981;text-align:center;">${q.length.toLocaleString('ar')}</div>
+      <div style="font-size:11px;color:var(--text3);text-align:center;margin-top:2px;">أصل جاهز للاستيراد من ملف Book3</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px;">
+      ${ASSET_TYPES.map(t=>`
+      <div style="background:var(--glass);border-radius:8px;padding:10px;display:flex;align-items:center;gap:8px;">
+        <span style="font-size:18px;">${t.ic}</span>
+        <div style="flex:1;">
+          <div style="font-size:11px;color:var(--text3);">${t.lb}</div>
+          <div style="font-weight:800;font-size:16px;color:var(--gold2);">${(byType[t.k]||0).toLocaleString('ar')}</div>
+        </div>
+      </div>`).join('')}
+    </div>
+    ${dup>0||skip>0?`<div style="font-size:11px;color:var(--text4);margin-bottom:12px;padding:8px;background:rgba(245,158,11,0.06);border-radius:6px;">
+      ${dup>0?`⚠️ تم تخطي <b>${dup}</b> أصل مكرر موجود مسبقاً.  `:''}
+      ${skip>0?`⚠️ تم تجاهل <b>${skip}</b> سطر فاضي.`:''}
+    </div>`:''}
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px;font-weight:600;">عينة من الأصول:</div>
+    <div style="background:var(--glass);border-radius:8px;overflow:hidden;margin-bottom:16px;">
+      ${sample.map(a=>`
+      <div style="padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;gap:10px;">
+        <span style="font-size:16px;">${ASSET_TYPES.find(t=>t.k===a.type)?.ic||'📦'}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${a.name}</div>
+          <div style="font-size:10px;color:var(--text4);">${a.projectNameRaw||'—'}</div>
+        </div>
+        <div style="font-size:10px;color:var(--text4);direction:ltr;">${a.assetNo}</div>
+      </div>`).join('')}
+      ${q.length>5?`<div style="padding:8px 12px;font-size:11px;color:var(--text4);text-align:center;">... و${(q.length-5).toLocaleString('ar')} أصل آخر</div>`:''}
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-gold btn-full" onclick="confirmBook3Import()" style="flex:2;">✅ تأكيد الاستيراد (${q.length.toLocaleString('ar')} أصل)</button>
+      <button class="btn btn-ghost btn-full" onclick="closeModal()" style="flex:1;">إلغاء</button>
+    </div>`;
+  }
+
   if(type==='addAsset') return `
     <div class="sheet-title"><h3>🏷️ إضافة أصل جديد</h3>${close}</div>
     <div style="margin-bottom:12px;">
@@ -7656,6 +7708,138 @@ function importAssetsExcel(event){
   };
   reader.readAsBinaryString(file);
   event.target.value=''; // Reset input
+}
+
+// =============================================
+// استيراد ملف Book3 (نظام محاسبة الأصول)
+// الأعمدة: Book | رقم الأصل | كود الحساب | اسم الأصل | الموديل | التسلسلي | الفئة | الموقع | الوحدات | الخردة | الموظف | رقم الموظف
+// =============================================
+function importBook3Assets(event){
+  const file = event.target.files[0];
+  if(!file) return;
+
+  // Category code → ASSET_TYPES key
+  const CAT_MAP = {
+    '03':'vehicle','04':'office','05':'office',
+    '06':'office','07':'furniture','08':'equipment','13':'other'
+  };
+
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const wb = XLSX.read(e.target.result, {type:'binary'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      // Get raw array of arrays to handle unnamed columns
+      const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+      if(aoa.length < 2) return showToast('الملف فاضي','#f43f5e');
+
+      // Auto-detect column positions from header row
+      const hdr = aoa[0].map(h=>String(h||'').trim());
+      // Column indices
+      const iAssetNo  = hdr.findIndex(h=>h.includes('Asset Cost')||h==' ') !== -1
+                        ? hdr.findIndex(h=>h==' ')||1 : 1;      // unnamed col = index 1
+      const iName     = 3;   // "ء" column = Arabic name
+      const iModel    = 4;   // Model Number
+      const iSerial   = 5;   // Serial Number
+      const iCategory = 6;   // Major Category
+      const iLoc      = 7;   // Loc3 = project
+      const iEmployee = 10;  // Employee
+
+      let added=0, skipped=0, duplicate=0;
+      if(!DB.assets) DB.assets=[];
+
+      // Build existing assetNo set for duplicate detection
+      const existingNos = new Set((DB.assets).map(a=>a.assetNo||''));
+
+      // Preview buffer
+      const toAdd = [];
+
+      aoa.slice(1).forEach(row=>{
+        const name = String(row[iName]||'').trim();
+        if(!name || name==='ء' || name==='undefined'){ skipped++; return; }
+
+        const assetNo = String(row[iAssetNo]||'').trim();
+        const model   = String(row[iModel]||'').trim();
+        const serial  = String(row[iSerial]||'').trim();
+        const catRaw  = String(row[iCategory]||'').trim();
+        const locRaw  = String(row[iLoc]||'').trim();
+        const emp     = String(row[iEmployee]||'').trim();
+
+        // Duplicate check
+        if(assetNo && existingNos.has(assetNo)){ duplicate++; return; }
+
+        // Parse category
+        const catParts = catRaw.split('-');
+        const catCode  = catParts[0]?.trim()||'';
+        const catName  = catParts.slice(1).join('-').trim()||catRaw;
+        const assetType = CAT_MAP[catCode]||'other';
+
+        // Parse project location
+        const locParts   = locRaw.split('-');
+        const projCode   = locParts[0]?.trim()||'';
+        const projName   = locParts.slice(1).join('-').trim()||locRaw;
+
+        // Match to existing project (by code or partial name)
+        const proj = DB.projects.find(p=>{
+          if(projCode && (p.name.includes(projCode)||projCode===p.id)) return true;
+          if(projName && (p.name.includes(projName.substring(0,10))||projName.includes(p.name.substring(0,10)))) return true;
+          return false;
+        });
+
+        // Serial no: for vehicles prefer serial col, then model (year)
+        const serialNo = serial||( assetType==='vehicle' ? model : '' );
+
+        toAdd.push({
+          id: uid(),
+          assetNo,
+          name,
+          type: assetType,
+          serialNo,
+          categoryName: catName,
+          projectId: proj?.id||'',
+          projectNameRaw: projName,
+          employee: emp,
+          condition: 'شغال',
+          notes: emp ? `مسؤول: ${emp}` : '',
+          value: 0,
+          purchaseDate: '',
+        });
+        if(assetNo) existingNos.add(assetNo);
+        added++;
+      });
+
+      if(toAdd.length===0){
+        showToast(`لا توجد أصول جديدة للاستيراد${duplicate>0?' — '+duplicate+' مكرر':''}`, '#f59e0b');
+        event.target.value=''; return;
+      }
+
+      // Show confirmation modal
+      window._book3ImportQueue = toAdd;
+      window._book3ImportSkipped = skipped;
+      window._book3ImportDuplicate = duplicate;
+      openModal('confirmBook3Import');
+
+    }catch(err){
+      console.error(err);
+      showToast('خطأ في قراءة الملف — تأكد أن الملف هو Book3.xlsx الأصلي','#f43f5e');
+    }
+  };
+  reader.readAsBinaryString(file);
+  event.target.value='';
+}
+
+function confirmBook3Import(){
+  const toAdd = window._book3ImportQueue||[];
+  if(!toAdd.length) return;
+  if(!DB.assets) DB.assets=[];
+  toAdd.forEach(a=> DB.assets.push(a));
+  saveDB();
+  window._book3ImportQueue=[];
+  closeModal();
+  currentTab='assets';
+  render();
+  logActivity('add','asset',`استيراد Book3: ${toAdd.length} أصل من نظام المحاسبة`);
+  showToast(`✅ تم استيراد ${toAdd.length} أصل بنجاح`,'#10b981');
 }
 
 function editAssetCondition(id){ openModal('editAsset',id); }
